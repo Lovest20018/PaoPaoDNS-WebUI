@@ -95,14 +95,14 @@ http://127.0.0.1:8080
 
 登录时使用刚才生成的 `WEB_UI_TOKEN`。
 
+默认映射为 `127.0.0.1:8080:8080`。如果宿主机 `8080` 已被占用，只需要改冒号左侧的宿主机端口，例如 `127.0.0.1:8123:8080`；容器内端口 `8080` 保持不变。
+
 `docker-compose-web.yaml` 会创建两个服务：
 
 - `paopaodns`：官方 `sliamb/paopaodns:latest` 镜像
 - `paopaodns-web`：GHCR 预构建 Web UI 镜像（默认 `ghcr.io/lovest20018/paopaodns-webui:latest`）
 
 两个容器共享同一个 `paopaodns-data` volume。
-
-> 推送到 GitHub 后，`.github/workflows/web-docker-ghcr.yml` 会自动构建并发布镜像到 GitHub Container Registry：`ghcr.io/lovest20018/paopaodns-webui:latest`。
 
 ### 方式二：给已有 PaoPaoDNS 添加 Web UI
 
@@ -114,11 +114,42 @@ http://127.0.0.1:8080
 git clone https://github.com/Lovest20018/PaoPaoDNS-WebUI.git
 cd PaoPaoDNS-WebUI
 
-export WEB_UI_TOKEN=$(openssl rand -hex 32)
-
-# 默认使用 GitHub Actions 自动发布的 GHCR 镜像
-export PAOPAODNS_WEB_IMAGE=ghcr.io/lovest20018/paopaodns-webui:latest
+# 可选：先保存当前 PaoPaoDNS 容器的环境变量，后面按实际值同步到 .env
+docker inspect paopaodns --format '{{range .Config.Env}}{{println .}}{{end}}' | sort > paopaodns-old-env.txt
 ```
+
+创建 `.env`：
+
+```bash
+cat > .env <<EOF
+WEB_UI_TOKEN=$(openssl rand -hex 32)
+
+# Web UI 镜像；默认使用 GHCR 预构建镜像，不需要本地 build
+PAOPAODNS_WEB_IMAGE=ghcr.io/lovest20018/paopaodns-webui:latest
+
+# 建议按 paopaodns-old-env.txt 中的实际值填写，仅用于 Web UI 判断热重载条件
+TZ=Asia/Shanghai
+CNAUTO=yes
+CNFALL=yes
+IPV6=no
+CN_TRACKER=yes
+USE_MARK_DATA=yes
+CUSTOM_FORWARD=
+RULES_TTL=0
+EOF
+
+chmod 600 .env
+```
+
+如果你使用下面的 `docker run` 命令，请先把 `.env` 加载到当前 shell：
+
+```bash
+set -a
+. ./.env
+set +a
+```
+
+如果使用 `docker compose`，Compose 会自动读取同目录的 `.env`。
 
 如果你要本地开发或 GHCR 镜像还没发布，也可以手动构建：
 
@@ -136,11 +167,16 @@ docker run -d \
   --name paopaodns-web \
   --restart unless-stopped \
   -v /opt/paopaodns/data:/data \
+  -e DATA_DIR=/data \
   -e WEB_UI_TOKEN="$WEB_UI_TOKEN" \
-  -e CNAUTO=yes \
-  -e CN_TRACKER=yes \
-  -e USE_MARK_DATA=yes \
-  -e RULES_TTL=0 \
+  -e TZ="${TZ:-Asia/Shanghai}" \
+  -e CNAUTO="${CNAUTO:-yes}" \
+  -e CNFALL="${CNFALL:-yes}" \
+  -e IPV6="${IPV6:-no}" \
+  -e CN_TRACKER="${CN_TRACKER:-yes}" \
+  -e USE_MARK_DATA="${USE_MARK_DATA:-yes}" \
+  -e CUSTOM_FORWARD="${CUSTOM_FORWARD:-}" \
+  -e RULES_TTL="${RULES_TTL:-0}" \
   -p 127.0.0.1:8080:8080 \
   "$PAOPAODNS_WEB_IMAGE"
 ```
@@ -160,11 +196,16 @@ docker run -d \
   --name paopaodns-web \
   --restart unless-stopped \
   -v paopaodns-data:/data \
+  -e DATA_DIR=/data \
   -e WEB_UI_TOKEN="$WEB_UI_TOKEN" \
-  -e CNAUTO=yes \
-  -e CN_TRACKER=yes \
-  -e USE_MARK_DATA=yes \
-  -e RULES_TTL=0 \
+  -e TZ="${TZ:-Asia/Shanghai}" \
+  -e CNAUTO="${CNAUTO:-yes}" \
+  -e CNFALL="${CNFALL:-yes}" \
+  -e IPV6="${IPV6:-no}" \
+  -e CN_TRACKER="${CN_TRACKER:-yes}" \
+  -e USE_MARK_DATA="${USE_MARK_DATA:-yes}" \
+  -e CUSTOM_FORWARD="${CUSTOM_FORWARD:-}" \
+  -e RULES_TTL="${RULES_TTL:-0}" \
   -p 127.0.0.1:8080:8080 \
   "$PAOPAODNS_WEB_IMAGE"
 ```

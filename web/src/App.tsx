@@ -28,6 +28,9 @@ const PAGE_COMPONENTS: Record<Page, React.FC> = {
   advanced: AdvancedConfigPage,
 };
 
+const WEB_UI_REPO_URL = 'https://github.com/Lovest20018/PaoPaoDNS-WebUI';
+const UPSTREAM_REPO_URL = 'https://github.com/kkkgo/PaoPaoDNS';
+
 function App() {
   const [activePage, setActivePage] = useState<Page>('overview');
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -78,13 +81,22 @@ function App() {
 
         <div className="sidebar-footer">
           <a
-            href="https://github.com/kkkgo/PaoPaoDNS"
+            href={WEB_UI_REPO_URL}
             target="_blank"
             rel="noopener noreferrer"
             style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', textDecoration: 'none' }}
           >
             <ExternalLink size={14} />
-            PaoPaoDNS GitHub
+            PaoPaoDNS-WebUI
+          </a>
+          <a
+            href={UPSTREAM_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', textDecoration: 'none', marginTop: 8 }}
+          >
+            <ExternalLink size={14} />
+            PaoPaoDNS 上游
           </a>
         </div>
       </aside>
