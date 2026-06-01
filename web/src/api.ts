@@ -4,6 +4,7 @@ function getToken(): string {
   try {
     return localStorage.getItem('paopaodns-token') || '';
   } catch {
+    // localStorage can be unavailable in restricted browser contexts.
     return '';
   }
 }
@@ -101,7 +102,9 @@ export function setToken(token: string): void {
     } else {
       localStorage.removeItem('paopaodns-token');
     }
-  } catch {}
+  } catch {
+    // Ignore storage failures; the current request can still proceed without a token.
+  }
 }
 
 export function getStoredToken(): string {

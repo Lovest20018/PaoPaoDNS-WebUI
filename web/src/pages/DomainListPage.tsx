@@ -70,6 +70,10 @@ const createCommentEntry = (): DomainEntry => ({
   comment: true,
 });
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 const ALL_LISTS = [
   ...LIST_FILE_INFO,
   {
@@ -91,9 +95,10 @@ const ALL_LISTS = [
 ];
 
 export default function DomainListPage() {
-  const { envValues, setFileContent } = useStore();
+  const { setFileContent } = useStore();
   const { showToast, ToastComponent } = useToast();
   const loadRequestId = useRef(0);
+  const loadFileRef = useRef<(key: string) => Promise<void>>(async () => {});
   const [activeTab, setActiveTab] = useState('force_dnscrypt_list');
   const [editMode, setEditMode] = useState<'visual' | 'text'>('text');
   const [entries, setEntries] = useState<DomainEntry[]>([]);
@@ -103,8 +108,6 @@ export default function DomainListPage() {
   const [loading, setLoading] = useState(false);
   const [saveResult, setSaveResult] = useState<{ success: boolean; msg: string } | null>(null);
 
-  const cnAutoEnabled = envValues.CNAUTO === 'yes';
-  const customForwardSet = !!envValues.CUSTOM_FORWARD && envValues.CUSTOM_FORWARD.match(/.:\d+/);
   const activeList = ALL_LISTS.find((l) => l.key === activeTab)!;
   const isTrackerList = activeTab === 'trackerslist';
   const ruleCount = entries.filter((entry) => entry.prefix !== '__comment__').length;
@@ -125,9 +128,10 @@ export default function DomainListPage() {
       setRawContent(content);
       setEntries(key === 'trackerslist' ? [] : parseListContent(content));
       setLastLoadedContent(content);
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const message = getErrorMessage(e);
       if (requestId !== loadRequestId.current) return;
-      if (e.message?.includes('not found') || e.message?.includes('404')) {
+      if (message.includes('not found') || message.includes('404')) {
         // File doesn't exist yet — show default content, allow creation
         const content = list.defaultContent;
         setRawContent(content);
@@ -139,7 +143,7 @@ export default function DomainListPage() {
         setRawContent(content);
         setEntries(key === 'trackerslist' ? [] : parseListContent(content));
         setLastLoadedContent(content);
-        showToast(`读取 ${list.filename} 失败: ${e.message}`);
+        showToast(`读取 ${list.filename} 失败: ${message}`);
       }
     } finally {
       if (requestId === loadRequestId.current) {
@@ -147,14 +151,16 @@ export default function DomainListPage() {
       }
     }
   };
-
-  useEffect(() => { loadFile(activeTab); }, [activeTab]);
+  useEffect(() => {
+    loadFileRef.current = loadFile;
+  });
 
   useEffect(() => {
-    if (isTrackerList && editMode === 'visual') {
-      setEditMode('text');
-    }
-  }, [isTrackerList, editMode]);
+    const timer = window.setTimeout(() => {
+      void loadFileRef.current(activeTab);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeTab]);
 
   const switchTab = (key: string) => {
     if (key === activeTab) return;
@@ -162,6 +168,9 @@ export default function DomainListPage() {
       return;
     }
     setSaveResult(null);
+    if (key === 'trackerslist') {
+      setEditMode('text');
+    }
     setActiveTab(key);
   };
 
@@ -252,8 +261,8 @@ export default function DomainListPage() {
       }
       setSaveResult({ success: true, msg });
       showToast('配置已保存到 /data 目录');
-    } catch (e: any) {
-      setSaveResult({ success: false, msg: e.message || '保存失败' });
+    } catch (e: unknown) {
+      setSaveResult({ success: false, msg: getErrorMessage(e) || '保存失败' });
     } finally {
       setSaving(false);
     }

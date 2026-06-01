@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import * as api from '../api';
 import {
@@ -20,6 +20,7 @@ export default function OverviewPage() {
   const [filesInfo, setFilesInfo] = useState<Record<string, { watched_now: boolean; condition: string }>>({});
   const [tokenInput, setTokenInput] = useState(api.getStoredToken());
   const [tokenVisible, setTokenVisible] = useState(false);
+  const loadStatusRef = useRef<() => Promise<void>>(async () => {});
 
   const cnAutoEnabled = envValues.CNAUTO === 'yes';
 
@@ -48,7 +49,16 @@ export default function OverviewPage() {
     }
   };
 
-  useEffect(() => { loadStatus(); }, []);
+  useEffect(() => {
+    loadStatusRef.current = loadStatus;
+  });
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadStatusRef.current();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const handleTokenSave = () => {
     api.setToken(tokenInput);

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import * as api from '../api';
 import { useToast } from '../hooks';
@@ -39,6 +39,14 @@ interface CustomModParseResult {
 
 const CUSTOM_MOD_KEYS = new Set(['Zones', 'Swaps', 'Hosts']);
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 function parseCustomModYaml(content: string): CustomModParseResult {
   const emptyResult: CustomModParseResult = { zones: [], swaps: [], hosts: [], visualSafe: true };
   if (!content.trim()) return emptyResult;
@@ -53,25 +61,34 @@ function parseCustomModYaml(content: string): CustomModParseResult {
 
     const data = parsed as Record<string, unknown>;
     const zones = Array.isArray(data.Zones)
-      ? data.Zones.map((item: any): CustomModZone => ({
-          zone: String(item?.zone ?? ''),
-          dns: String(item?.dns ?? ''),
-          ttl: Number(item?.ttl ?? 0) || 0,
-          seq: item?.seq === 'top6' || item?.seq === 'list' ? item.seq : 'top',
-          socks5: item?.socks5 === 'yes' ? 'yes' : 'no',
-        }))
+      ? data.Zones.map((item: unknown): CustomModZone => {
+          const record = asRecord(item);
+          return {
+            zone: String(record.zone ?? ''),
+            dns: String(record.dns ?? ''),
+            ttl: Number(record.ttl ?? 0) || 0,
+            seq: record.seq === 'top6' || record.seq === 'list' ? record.seq : 'top',
+            socks5: record.socks5 === 'yes' ? 'yes' : 'no',
+          };
+        })
       : [];
     const swaps = Array.isArray(data.Swaps)
-      ? data.Swaps.map((item: any): CustomModSwap => ({
-          env_key: String(item?.env_key ?? ''),
-          cidr_file: String(item?.cidr_file ?? ''),
-        }))
+      ? data.Swaps.map((item: unknown): CustomModSwap => {
+          const record = asRecord(item);
+          return {
+            env_key: String(record.env_key ?? ''),
+            cidr_file: String(record.cidr_file ?? ''),
+          };
+        })
       : [];
     const hosts = Array.isArray(data.Hosts)
-      ? data.Hosts.map((item: any): CustomModHost => ({
-          env_key: String(item?.env_key ?? ''),
-          zone: String(item?.zone ?? ''),
-        }))
+      ? data.Hosts.map((item: unknown): CustomModHost => {
+          const record = asRecord(item);
+          return {
+            env_key: String(record.env_key ?? ''),
+            zone: String(record.zone ?? ''),
+          };
+        })
       : [];
 
     return { zones, swaps, hosts, visualSafe: true };
@@ -103,6 +120,7 @@ export default function AdvancedConfigPage() {
     custom_mod: false,
     unbound_custom: false,
   });
+  const loadFileRef = useRef<(tab: SubTab) => Promise<void>>(async () => {});
 
   const loadFile = async (tab: SubTab) => {
     const filename = tab === 'custom_env' ? 'custom_env.ini' : tab === 'custom_mod' ? 'custom_mod.yaml' : 'unbound_custom.conf';
@@ -132,9 +150,10 @@ export default function AdvancedConfigPage() {
         store.setCustomEnvEntries(parsed);
       }
       setLoadedFromServer(prev => ({ ...prev, [tab]: true }));
-    } catch (e: any) {
-      if (!e.message?.includes('not found') && !e.message?.includes('404')) {
-        showToast(`读取 ${filename} 失败: ${e.message}`);
+    } catch (e: unknown) {
+      const message = getErrorMessage(e);
+      if (!message.includes('not found') && !message.includes('404')) {
+        showToast(`读取 ${filename} 失败: ${message}`);
       }
       setLoadedFromServer(prev => ({ ...prev, [tab]: true }));
     } finally {
@@ -143,10 +162,16 @@ export default function AdvancedConfigPage() {
   };
 
   useEffect(() => {
-    if (!loadedFromServer[activeSubTab]) {
-      loadFile(activeSubTab);
-    }
-  }, [activeSubTab]);
+    loadFileRef.current = loadFile;
+  });
+
+  useEffect(() => {
+    if (loadedFromServer[activeSubTab]) return;
+    const timer = window.setTimeout(() => {
+      void loadFileRef.current(activeSubTab);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeSubTab, loadedFromServer]);
 
   const hasCustomModVisualEntries = customModZones.length > 0 || customModSwaps.length > 0 || customModHosts.length > 0;
   const getCustomModOutput = () => {
@@ -200,22 +225,21 @@ export default function AdvancedConfigPage() {
     removeCustomModHost(index);
   };
 
+  const getActiveOutput = (): { filename: string; content: string } => {
+    if (activeSubTab === 'custom_env') {
+      return { filename: 'custom_env.ini', content: generateCustomEnvIni() };
+    }
+    if (activeSubTab === 'custom_mod') {
+      return { filename: 'custom_mod.yaml', content: getCustomModOutput() };
+    }
+    return { filename: 'unbound_custom.conf', content: unboundContent };
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setSaveResult(null);
     try {
-      let filename = '';
-      let content = '';
-      if (activeSubTab === 'custom_env') {
-        filename = 'custom_env.ini';
-        content = generateCustomEnvIni();
-      } else if (activeSubTab === 'custom_mod') {
-        filename = 'custom_mod.yaml';
-        content = getCustomModOutput();
-      } else {
-        filename = 'unbound_custom.conf';
-        content = unboundContent;
-      }
+      const { filename, content } = getActiveOutput();
       const result = await api.writeFile(filename, content);
       let msg: string;
       if (result.watched_now) {
@@ -235,28 +259,21 @@ export default function AdvancedConfigPage() {
         setCustomModDirty(false);
       }
       showToast('配置已保存');
-    } catch (e: any) {
-      setSaveResult({ success: false, msg: e.message || '保存失败' });
+    } catch (e: unknown) {
+      setSaveResult({ success: false, msg: getErrorMessage(e) || '保存失败' });
     } finally {
       setSaving(false);
     }
   };
 
   const handleCopyOutput = async () => {
-    let content = '';
-    if (activeSubTab === 'custom_env') content = generateCustomEnvIni();
-    else if (activeSubTab === 'custom_mod') content = getCustomModOutput();
-    else content = unboundContent;
+    const { content } = getActiveOutput();
     await copyToClipboard(content);
     showToast('已复制到剪贴板');
   };
 
   const handleDownloadOutput = () => {
-    let content = '';
-    let filename = '';
-    if (activeSubTab === 'custom_env') { content = generateCustomEnvIni(); filename = 'custom_env.ini'; }
-    else if (activeSubTab === 'custom_mod') { content = getCustomModOutput(); filename = 'custom_mod.yaml'; }
-    else { content = unboundContent; filename = 'unbound_custom.conf'; }
+    const { filename, content } = getActiveOutput();
     downloadFile(content, filename);
     showToast('文件已下载');
   };
@@ -369,7 +386,7 @@ export default function AdvancedConfigPage() {
                 </div>
                 <div className="form-row">
                   <div className="form-group"><label className="form-label">TTL</label><input className="form-input" type="number" value={zone.ttl} min={0} onChange={(e) => updateZone(i, { ...zone, ttl: parseInt(e.target.value) || 0 })} /></div>
-                  <div className="form-group"><label className="form-label">优先级 (seq)</label><select className="form-select" value={zone.seq} onChange={(e) => updateZone(i, { ...zone, seq: e.target.value as any })}><option value="top">top</option><option value="top6">top6</option><option value="list">list</option></select></div>
+                  <div className="form-group"><label className="form-label">优先级 (seq)</label><select className="form-select" value={zone.seq} onChange={(e) => updateZone(i, { ...zone, seq: e.target.value as CustomModZone['seq'] })}><option value="top">top</option><option value="top6">top6</option><option value="list">list</option></select></div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer' }}>

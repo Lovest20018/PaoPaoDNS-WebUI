@@ -168,19 +168,23 @@ export default function DeployPage() {
     envVars: withDefaultEnvValues(envValues),
   }));
 
-  const [envLoadedOnInit, setEnvLoadedOnInit] = useState(false);
+  const envLoadedOnInitRef = useRef(false);
 
   // Sync env values once loaded from API
   useEffect(() => {
-    if (envLoaded && !envLoadedOnInit) {
-      setEnvLoadedOnInit(true);
+    if (!envLoaded || envLoadedOnInitRef.current) return;
+    const timer = window.setTimeout(() => {
+      envLoadedOnInitRef.current = true;
       api.getEnv().then((env) => {
         if (!envTouchedRef.current) {
           setConfig((prev) => ({ ...prev, envVars: withDefaultEnvValues(env) }));
         }
-      }).catch(() => {});
-    }
-  }, [envLoaded, envLoadedOnInit]);
+      }).catch(() => {
+        // Keep the editable defaults if the optional environment refresh fails.
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [envLoaded]);
 
   const dockerRunCmd = generateDockerRun(config);
   const dockerComposeContent = generateDockerCompose(config);

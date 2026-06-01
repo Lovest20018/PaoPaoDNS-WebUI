@@ -4,8 +4,9 @@ import {
   Settings, GitBranch, Globe, ArrowRightLeft,
   Sliders, Bug, AlertTriangle
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
-const ICON_MAP: Record<string, React.FC<any>> = {
+const ICON_MAP: Record<string, LucideIcon> = {
   Settings, GitBranch, Globe, ArrowRightLeft, Sliders, Bug,
 };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import * as api from '../api';
 import { useToast } from '../hooks';
@@ -11,6 +11,10 @@ interface TtlRuleEntry {
   type: 'forward' | 'record' | 'cname';
   matchMode?: 'subdomain' | 'exact';
   record?: string;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function parseTtlRules(content: string): TtlRuleEntry[] {
@@ -69,6 +73,7 @@ export default function TtlRulesPage() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saveResult, setSaveResult] = useState<{ success: boolean; msg: string } | null>(null);
+  const loadFileRef = useRef<() => Promise<void>>(async () => {});
 
   const getCurrentContent = () => editMode === 'visual' ? serializeTtlRules(entries) : rawContent;
 
@@ -79,19 +84,29 @@ export default function TtlRulesPage() {
       const content = result.content || '';
       setRawContent(content);
       setEntries(parseTtlRules(content));
-    } catch (e: any) {
-      if (e.message?.includes('not found') || e.message?.includes('404')) {
+    } catch (e: unknown) {
+      const message = getErrorMessage(e);
+      if (message.includes('not found') || message.includes('404')) {
         setRawContent('');
         setEntries([]);
       } else {
-        showToast('读取 force_ttl_rules.txt 失败: ' + e.message);
+        showToast('读取 force_ttl_rules.txt 失败: ' + message);
       }
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { loadFile(); }, []);
+  useEffect(() => {
+    loadFileRef.current = loadFile;
+  });
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadFileRef.current();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const addEntry = () => {
     setEntries((prev) => [
@@ -136,8 +151,8 @@ export default function TtlRulesPage() {
       }
       setSaveResult({ success: true, msg });
       showToast('配置已保存到 /data');
-    } catch (e: any) {
-      setSaveResult({ success: false, msg: e.message || '保存失败' });
+    } catch (e: unknown) {
+      setSaveResult({ success: false, msg: getErrorMessage(e) || '保存失败' });
     } finally {
       setSaving(false);
     }
@@ -271,7 +286,10 @@ export default function TtlRulesPage() {
                     <select
                       className="form-select"
                       value={entry.type}
-                      onChange={(e) => updateEntry(entry.id, { type: e.target.value as any, matchMode: e.target.value === 'forward' ? undefined : entry.matchMode || 'subdomain' })}
+                      onChange={(e) => {
+                        const type = e.target.value as TtlRuleEntry['type'];
+                        updateEntry(entry.id, { type, matchMode: type === 'forward' ? undefined : entry.matchMode || 'subdomain' });
+                      }}
                     >
                       <option value="forward">转发到 DNS 服务器 (@)</option>
                       <option value="record">指定 A/AAAA 记录 (@@/@@@)</option>

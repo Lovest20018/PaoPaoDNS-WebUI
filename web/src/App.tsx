@@ -3,6 +3,7 @@ import {
   LayoutDashboard, FileText, Terminal,
   Clock, SlidersHorizontal, ExternalLink, Moon, Sun
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import OverviewPage from './pages/OverviewPage';
 import DomainListPage from './pages/DomainListPage';
 import DeployPage from './pages/DeployPage';
@@ -12,7 +13,7 @@ import AdvancedConfigPage from './pages/AdvancedConfigPage';
 type Page = 'overview' | 'lists' | 'deploy' | 'ttl' | 'advanced';
 type ThemeMode = 'light' | 'dark';
 
-const NAV_ITEMS: { key: Page; label: string; icon: React.FC<any> }[] = [
+const NAV_ITEMS: { key: Page; label: string; icon: LucideIcon }[] = [
   { key: 'overview', label: '概览', icon: LayoutDashboard },
   { key: 'lists', label: '域名列表', icon: FileText },
   { key: 'deploy', label: '部署生成', icon: Terminal },
