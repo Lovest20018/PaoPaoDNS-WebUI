@@ -22,6 +22,47 @@
 - 生成 docker compose / docker run 部署配置
 - 支持亮色/暗色主题
 
+## 界面预览
+
+### 概览
+
+查看 `/data` 目录读写状态、Token 鉴权状态、关键配置文件是否存在，以及各文件保存后的热重载条件。
+
+![概览](docs/screenshots/overview.png)
+
+### 域名列表
+
+支持常用分流列表的文本编辑和可视化编辑，可在列表中插入规则或注释，保存后根据当前运行条件提示是否会自动热重载。
+
+![域名列表](docs/screenshots/domain-lists.png)
+
+### 部署生成
+
+可视化生成 `docker-compose.yaml` 或 `docker run` 命令，用于新建 PaoPaoDNS 容器或重新部署；此页面只导出配置，不写入 `/data`。
+
+![部署生成](docs/screenshots/deploy.png)
+
+### TTL 规则
+
+可视化编辑 `force_ttl_rules.txt`，适合把指定域名转发到指定 DNS 或直接指定 A/AAAA/CNAME 结果。
+
+![TTL 规则](docs/screenshots/ttl-rules.png)
+
+### 高级配置
+
+编辑 `custom_env.ini`、`custom_mod.yaml`、`unbound_custom.conf`。页面会根据文件类型提示自动热重载、手动 reload 或重启容器。
+
+![高级配置](docs/screenshots/advanced-config.png)
+
+## 使用流程
+
+1. 部署 PaoPaoDNS 与 Web UI，并确认两个容器共享同一个 `/data` volume 或 bind mount。
+2. 访问 `http://127.0.0.1:8080`，输入 `WEB_UI_TOKEN` 完成鉴权。
+3. 在「概览」确认 `/data` 可读写、文件存在状态和热重载条件。
+4. 在「域名列表」「TTL 规则」「高级配置」中编辑对应文件并保存。
+5. 根据保存后的提示判断配置是否已自动热重载；如果提示需要 reload 或重启，请在宿主机执行对应操作。
+6. 如需重新部署，可在「部署生成」中导出 `docker-compose.yaml` 或 `docker run` 命令。
+
 ## 设计原则
 
 - **不需要 Docker socket**：Web UI 不能控制宿主机 Docker，也不能随意操作容器。
