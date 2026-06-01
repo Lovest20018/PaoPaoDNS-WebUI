@@ -1,0 +1,31 @@
+services:
+  paopaodns-web:
+    image: ${PAOPAODNS_WEB_IMAGE:-ghcr.io/lovest20018/paopaodns-webui:latest}
+    container_name: paopaodns-web
+    restart: unless-stopped
+    volumes:
+      # Bind mount example: replace with the host path used by your PaoPaoDNS /data.
+      # - /opt/paopaodns/data:/data
+
+      # Named volume example: replace with your existing PaoPaoDNS data volume name.
+      - paopaodns-data:/data
+    environment:
+      - DATA_DIR=/data
+      - WEB_UI_TOKEN=${WEB_UI_TOKEN:?set WEB_UI_TOKEN, e.g. openssl rand -hex 32}
+      # Set WEB_UI_ALLOW_NO_AUTH=true to allow access without token (not recommended).
+      # Mirror key PaoPaoDNS runtime env values here so Web UI can report reload conditions accurately.
+      - CNAUTO=${CNAUTO:-yes}
+      - CNFALL=${CNFALL:-yes}
+      - IPV6=${IPV6:-no}
+      - CN_TRACKER=${CN_TRACKER:-yes}
+      - USE_MARK_DATA=${USE_MARK_DATA:-yes}
+      - CUSTOM_FORWARD=${CUSTOM_FORWARD:-}
+      - RULES_TTL=${RULES_TTL:-0}
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  # Mark the volume as external because it should already be created by PaoPaoDNS.
+  # If you use a bind mount above instead, remove this volumes section.
+  paopaodns-data:
+    external: true

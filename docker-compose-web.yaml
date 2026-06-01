@@ -1,0 +1,45 @@
+services:
+  paopaodns:
+    image: sliamb/paopaodns:latest
+    container_name: paopaodns
+    restart: always
+    volumes:
+      - paopaodns-data:/data
+    environment:
+      - TZ=Asia/Shanghai
+      - CNAUTO=${CNAUTO:-yes}
+      - CNFALL=${CNFALL:-yes}
+      - IPV6=${IPV6:-no}
+      - CN_TRACKER=${CN_TRACKER:-yes}
+      - USE_MARK_DATA=${USE_MARK_DATA:-yes}
+      - CUSTOM_FORWARD=${CUSTOM_FORWARD:-}
+      - RULES_TTL=${RULES_TTL:-0}
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+
+  paopaodns-web:
+    image: ${PAOPAODNS_WEB_IMAGE:-ghcr.io/lovest20018/paopaodns-webui:latest}
+    container_name: paopaodns-web
+    restart: always
+    volumes:
+      - paopaodns-data:/data
+    environment:
+      - DATA_DIR=/data
+      - WEB_UI_TOKEN=${WEB_UI_TOKEN:?set WEB_UI_TOKEN, e.g. openssl rand -hex 32}
+      # Set WEB_UI_ALLOW_NO_AUTH=true to allow access without token (not recommended)
+      # Mirror PaoPaoDNS runtime env so the Web UI can report reload conditions accurately.
+      - CNAUTO=${CNAUTO:-yes}
+      - CNFALL=${CNFALL:-yes}
+      - IPV6=${IPV6:-no}
+      - CN_TRACKER=${CN_TRACKER:-yes}
+      - USE_MARK_DATA=${USE_MARK_DATA:-yes}
+      - CUSTOM_FORWARD=${CUSTOM_FORWARD:-}
+      - RULES_TTL=${RULES_TTL:-0}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      - paopaodns
+
+volumes:
+  paopaodns-data:

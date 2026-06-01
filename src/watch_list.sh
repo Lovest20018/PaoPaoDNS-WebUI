@@ -149,7 +149,7 @@ reload_dns() {
                 export reload_mosdns=1
             fi
         fi
-        RULES_TTL=$(echo "$RULES_TTL" | grep -Eo "[0-9]+|head -1")
+        RULES_TTL=$(echo "$RULES_TTL" | grep -Eo "[0-9]+" | head -1)
         if [ -z "$RULES_TTL" ]; then
             RULES_TTL=0
         fi
@@ -178,7 +178,7 @@ reload_dns() {
             done
             echo "mosdns reload..."
             touch /data/custom_env.ini
-            grep -Eo "^[_a-zA-Z0-9]+=\".+\"" /data/custom_env.ini >/tmp/custom_env.ini
+            grep -Eo "^[_a-zA-Z0-9]+=\".*\"" /data/custom_env.ini >/tmp/custom_env.ini
             if [ -f "/tmp/custom_env.ini" ]; then
                 while IFS= read -r line; do
                     line=$(echo "$line" | sed 's/"//g' | sed "s/'//g")
@@ -252,7 +252,7 @@ while true; do
                 cp /usr/sbin/force_forward_list.txt /data/
             fi
         fi
-        RULES_TTL=$(echo "$RULES_TTL" | grep -Eo "[0-9]+|head -1")
+        RULES_TTL=$(echo "$RULES_TTL" | grep -Eo "[0-9]+" | head -1)
         if [ -z "$RULES_TTL" ]; then
             RULES_TTL=0
         fi
@@ -285,5 +285,5 @@ while true; do
     fi
     named=$(gen_hash /etc/unbound/named.cache)
     export named
-    inotifywait -e modify,delete $file_list && sleep 1 && reload_dns check
+    inotifywait -e modify,close_write,delete,move_self,delete_self,moved_to,create $file_list && sleep 1 && reload_dns check
 done

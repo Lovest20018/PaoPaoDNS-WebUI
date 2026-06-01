@@ -20,7 +20,7 @@ rm /tmp/*.toml >/dev/null 2>&1
 if [ ! -f /data/custom_env.ini ]; then
     cp /usr/sbin/custom_env.ini /data/
 fi
-grep -Eo "^[_a-zA-Z0-9]+=\".+\"" /data/custom_env.ini >/tmp/custom_env.ini
+grep -Eo "^[_a-zA-Z0-9]+=\".*\"" /data/custom_env.ini >/tmp/custom_env.ini
 if [ -f "/tmp/custom_env.ini" ]; then
     while IFS= read -r line; do
         line=$(echo "$line" | sed 's/"//g' | sed "s/'//g")
@@ -422,11 +422,11 @@ if [ "$CNAUTO" != "no" ]; then
     if [ -f /data/force_forward_list.txt ]; then
         mosdns eat list /tmp/force_forward_list.txt /data/force_forward_list.txt
     fi
-    RULES_TTL=$(echo "$RULES_TTL" | grep -Eo "[0-9]+|head -1")
+    RULES_TTL=$(echo "$RULES_TTL" | grep -Eo "[0-9]+" | head -1)
     if [ -z "$RULES_TTL" ]; then
         RULES_TTL=0
     fi
-    CUSTOM_FORWARD_TTL=$(echo "$CUSTOM_FORWARD_TTL" | grep -Eo "[0-9]+|head -1")
+    CUSTOM_FORWARD_TTL=$(echo "$CUSTOM_FORWARD_TTL" | grep -Eo "[0-9]+" | head -1)
     if [ -z "$CUSTOM_FORWARD_TTL" ]; then
         CUSTOM_FORWARD_TTL=0
     fi

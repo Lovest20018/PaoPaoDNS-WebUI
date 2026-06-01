@@ -1,7 +1,7 @@
 #!/bin/sh
 . /etc/profile
 if [ -f /data/custom_env.ini ]; then
-    grep -Eo "^[_a-zA-Z0-9]+=\".+\"" /data/custom_env.ini >/tmp/custom_env.ini
+    grep -Eo "^[_a-zA-Z0-9]+=\".*\"" /data/custom_env.ini >/tmp/custom_env.ini
     if [ -f "/tmp/custom_env.ini" ]; then
         while IFS= read -r line; do
             line=$(echo "$line" | sed 's/"//g' | sed "s/'//g")
