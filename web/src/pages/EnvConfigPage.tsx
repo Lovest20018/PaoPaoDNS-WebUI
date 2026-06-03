@@ -1,10 +1,13 @@
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
+import * as api from '../api';
 import { ENV_VARS, GROUP_LABELS } from '../types';
 import {
   Settings, GitBranch, Globe, ArrowRightLeft,
   Sliders, Bug, AlertTriangle
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { CustomEnvEntry } from '../types';
 
 const ICON_MAP: Record<string, LucideIcon> = {
   Settings, GitBranch, Globe, ArrowRightLeft, Sliders, Bug,
@@ -12,11 +15,63 @@ const ICON_MAP: Record<string, LucideIcon> = {
 
 const GROUP_ORDER = ['basic', 'cn_routing', 'ipv6', 'custom_forward', 'advanced', 'debug'];
 
+function parseCustomEnv(content: string): CustomEnvEntry[] {
+  const entries: CustomEnvEntry[] = [];
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const isCommented = trimmed.startsWith('#');
+    const variableLine = isCommented ? trimmed.replace(/^#+\s*/, '') : trimmed;
+    const match = variableLine.match(/^([_a-zA-Z0-9]+)="(.*)"$/);
+    if (match) {
+      entries.push({ key: match[1], value: match[2], enabled: !isCommented });
+    }
+  }
+  return entries;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default function EnvConfigPage() {
-  const { envValues, customEnvEntries } = useStore();
+  const { envValues, customEnvEntries, setCustomEnvEntries } = useStore();
+  const loadEnvRef = useRef<() => Promise<void>>(async () => {});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const customEnvByKey = new Map(customEnvEntries.filter((entry) => entry.key).map((entry) => [entry.key, entry]));
   const cnAutoEntry = customEnvByKey.get('CNAUTO');
   const cnAutoEnabled = (cnAutoEntry?.enabled ? cnAutoEntry.value : envValues.CNAUTO) === 'yes';
+
+  const loadEnv = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const result = await api.readFile('custom_env.ini');
+      setCustomEnvEntries(parseCustomEnv(result.content || ''));
+    } catch (e: unknown) {
+      const message = getErrorMessage(e);
+      if (message.includes('not found') || message.includes('404')) {
+        setCustomEnvEntries([]);
+      } else {
+        setError(message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadEnvRef.current = loadEnv;
+  });
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadEnvRef.current();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   return (
     <div>
@@ -41,6 +96,20 @@ export default function EnvConfigPage() {
           如需修改 Docker 启动环境变量（如 CNAUTO、IPV6 等），需要重新创建容器，请使用"部署生成"页面。
         </div>
       </div>
+
+      {loading && (
+        <div className="card">
+          <div className="card-desc">正在读取 custom_env.ini...</div>
+        </div>
+      )}
+
+      {error && (
+        <div className="card" style={{ borderColor: 'var(--accent-red)' }}>
+          <div className="card-desc" style={{ color: 'var(--accent-red)' }}>
+            读取 custom_env.ini 失败：{error}
+          </div>
+        </div>
+      )}
 
       {GROUP_ORDER.map((group) => {
         const groupInfo = GROUP_LABELS[group];

@@ -6,15 +6,17 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import OverviewPage from './pages/OverviewPage';
 import DomainListPage from './pages/DomainListPage';
+import EnvConfigPage from './pages/EnvConfigPage';
 import DeployPage from './pages/DeployPage';
 import TtlRulesPage from './pages/TtlRulesPage';
 import AdvancedConfigPage from './pages/AdvancedConfigPage';
 
-type Page = 'overview' | 'lists' | 'deploy' | 'ttl' | 'advanced';
+type Page = 'overview' | 'env' | 'lists' | 'deploy' | 'ttl' | 'advanced';
 type ThemeMode = 'light' | 'dark';
 
 const NAV_ITEMS: { key: Page; label: string; icon: LucideIcon }[] = [
   { key: 'overview', label: '概览', icon: LayoutDashboard },
+  { key: 'env', label: '环境变量', icon: SlidersHorizontal },
   { key: 'lists', label: '域名列表', icon: FileText },
   { key: 'deploy', label: '部署生成', icon: Terminal },
   { key: 'ttl', label: 'TTL 规则', icon: Clock },
@@ -23,6 +25,7 @@ const NAV_ITEMS: { key: Page; label: string; icon: LucideIcon }[] = [
 
 const PAGE_COMPONENTS: Record<Page, React.FC> = {
   overview: OverviewPage,
+  env: EnvConfigPage,
   lists: DomainListPage,
   deploy: DeployPage,
   ttl: TtlRulesPage,
