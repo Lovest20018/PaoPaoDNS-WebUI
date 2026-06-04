@@ -13,16 +13,38 @@ interface TtlRuleEntry {
   record?: string;
 }
 
+interface TtlRuleParseResult {
+  entries: TtlRuleEntry[];
+  visualSafe: boolean;
+}
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function parseTtlRules(content: string): TtlRuleEntry[] {
+const TTL_VISUAL_HEADER_LINES = new Set([
+  '# TTL 规则配置文件',
+  '# 格式: domain@server:port 或 domain@@record',
+  '# domain@server:port — 转发到指定DNS服务器',
+  '# domain@@IP — 直接指定A/AAAA记录(子域名匹配)',
+  '# domain@@@IP — 精确匹配指定A/AAAA记录',
+  '# domain@@CNAME — 子域名CNAME到另一域名',
+  '# domain@@@CNAME — 精确匹配CNAME到另一域名',
+]);
+
+function parseTtlRules(content: string): TtlRuleParseResult {
   const entries: TtlRuleEntry[] = [];
   let id = 0;
+  let visualSafe = true;
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (!trimmed) continue;
+    if (trimmed.startsWith('#')) {
+      if (!TTL_VISUAL_HEADER_LINES.has(trimmed)) {
+        visualSafe = false;
+      }
+      continue;
+    }
 
     if (trimmed.includes('@@@')) {
       const [domain, record] = trimmed.split('@@@');
@@ -33,9 +55,11 @@ function parseTtlRules(content: string): TtlRuleEntry[] {
     } else if (trimmed.includes('@')) {
       const [domain, serverPart] = trimmed.split('@');
       entries.push({ id: id++, domain: domain.trim(), server: serverPart?.trim() || '', type: 'forward' });
+    } else {
+      visualSafe = false;
     }
   }
-  return entries;
+  return { entries, visualSafe };
 }
 
 function serializeTtlRules(entries: TtlRuleEntry[]): string {
@@ -69,7 +93,8 @@ export default function TtlRulesPage() {
 
   const [entries, setEntries] = useState<TtlRuleEntry[]>([]);
   const [rawContent, setRawContent] = useState('');
-  const [editMode, setEditMode] = useState<'visual' | 'text'>('visual');
+  const [editMode, setEditMode] = useState<'visual' | 'text'>('text');
+  const [visualSafe, setVisualSafe] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saveResult, setSaveResult] = useState<{ success: boolean; msg: string } | null>(null);
@@ -82,13 +107,16 @@ export default function TtlRulesPage() {
     try {
       const result = await api.readFile('force_ttl_rules.txt');
       const content = result.content || '';
+      const parsed = parseTtlRules(content);
       setRawContent(content);
-      setEntries(parseTtlRules(content));
+      setEntries(parsed.entries);
+      setVisualSafe(parsed.visualSafe);
     } catch (e: unknown) {
       const message = getErrorMessage(e);
       if (message.includes('not found') || message.includes('404')) {
         setRawContent('');
         setEntries([]);
+        setVisualSafe(true);
       } else {
         showToast('读取 force_ttl_rules.txt 失败: ' + message);
       }
@@ -118,7 +146,14 @@ export default function TtlRulesPage() {
   const switchEditMode = (mode: 'visual' | 'text') => {
     if (mode === editMode) return;
     if (mode === 'visual') {
-      setEntries(parseTtlRules(rawContent));
+      const parsed = parseTtlRules(rawContent);
+      if (!parsed.visualSafe) {
+        setVisualSafe(false);
+        showToast('当前文件含有可视化编辑无法保留的注释或语法，请使用文本编辑保存原文');
+        return;
+      }
+      setEntries(parsed.entries);
+      setVisualSafe(true);
     } else {
       setRawContent(serializeTtlRules(entries));
     }
@@ -127,6 +162,11 @@ export default function TtlRulesPage() {
 
   const updateEntry = (id: number, updates: Partial<TtlRuleEntry>) => {
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...updates } : e)));
+  };
+
+  const updateRawContent = (content: string) => {
+    setRawContent(content);
+    setVisualSafe(parseTtlRules(content).visualSafe);
   };
 
   const removeEntry = (id: number) => {
@@ -244,6 +284,8 @@ export default function TtlRulesPage() {
           <button
             className={`tab-item ${editMode === 'visual' ? 'active' : ''}`}
             onClick={() => switchEditMode('visual')}
+            disabled={!visualSafe}
+            title={!visualSafe ? '当前文件含有可视化编辑无法保留的注释或语法' : undefined}
           >
             可视化编辑
           </button>
@@ -254,6 +296,12 @@ export default function TtlRulesPage() {
             文本编辑
           </button>
         </div>
+
+        {!visualSafe && (
+          <div className="card-desc" style={{ marginBottom: 16, color: 'var(--accent-amber)' }}>
+            当前 force_ttl_rules.txt 含有可视化编辑无法无损保留的注释或语法，已使用文本编辑以避免保存时重写原文件。
+          </div>
+        )}
 
         {loading ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>加载中...</div>
@@ -363,7 +411,7 @@ export default function TtlRulesPage() {
           <textarea
             className="textarea-code"
             value={rawContent}
-            onChange={(e) => setRawContent(e.target.value)}
+            onChange={(e) => updateRawContent(e.target.value)}
             rows={15}
           />
         )}

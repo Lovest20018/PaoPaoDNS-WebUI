@@ -8,26 +8,47 @@ import type { CustomModZone, CustomModSwap, CustomModHost, CustomEnvEntry } from
 import YAML from 'yaml';
 
 type SubTab = 'custom_env' | 'custom_mod' | 'unbound_custom';
+type CustomEnvEditMode = 'text' | 'visual';
 
-function parseCustomEnv(content: string): CustomEnvEntry[] {
+interface CustomEnvParseResult {
+  entries: CustomEnvEntry[];
+  visualSafe: boolean;
+}
+
+const CUSTOM_ENV_VISUAL_HEADER_LINES = new Set([
+  '# Variables configured here',
+  '# override the ENV at docker startup.',
+  '# MosDNS reload if Modifying this file.',
+  '# Format: key="value"',
+]);
+
+function parseCustomEnv(content: string): CustomEnvParseResult {
   const entries: CustomEnvEntry[] = [];
+  let visualSafe = true;
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) {
+    if (!trimmed) {
+      continue;
+    }
+    if (trimmed.startsWith('#')) {
       // Check if it's a commented-out variable
       const uncommented = trimmed.replace(/^#+\s*/, '');
       const match = uncommented.match(/^([_a-zA-Z0-9]+)="(.*)"$/);
       if (match) {
         entries.push({ key: match[1], value: match[2], enabled: false });
+      } else if (!CUSTOM_ENV_VISUAL_HEADER_LINES.has(trimmed)) {
+        visualSafe = false;
       }
       continue;
     }
     const match = trimmed.match(/^([_a-zA-Z0-9]+)="(.*)"$/);
     if (match) {
       entries.push({ key: match[1], value: match[2], enabled: true });
+    } else {
+      visualSafe = false;
     }
   }
-  return entries;
+  return { entries, visualSafe };
 }
 
 interface CustomModParseResult {
@@ -108,6 +129,10 @@ export default function AdvancedConfigPage() {
 
   const { showToast, ToastComponent } = useToast();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('custom_env');
+  const [customEnvContent, setCustomEnvContent] = useState('');
+  const [customEnvEditMode, setCustomEnvEditMode] = useState<CustomEnvEditMode>('text');
+  const [customEnvDirty, setCustomEnvDirty] = useState(false);
+  const [customEnvVisualSafe, setCustomEnvVisualSafe] = useState(true);
   const [unboundContent, setUnboundContent] = useState('');
   const [customModContent, setCustomModContent] = useState('');
   const [customModDirty, setCustomModDirty] = useState(false);
@@ -145,13 +170,36 @@ export default function AdvancedConfigPage() {
       } else {
         // Parse custom_env.ini into entries
         const parsed = parseCustomEnv(content);
+        setCustomEnvContent(content);
+        setCustomEnvDirty(false);
+        setCustomEnvVisualSafe(parsed.visualSafe);
         // Always replace local entries with the file content, even when it is empty.
         const store = useStore.getState();
-        store.setCustomEnvEntries(parsed);
+        store.setCustomEnvEntries(parsed.entries);
+        if (!parsed.visualSafe) {
+          showToast('custom_env.ini 含有可视化编辑无法保留的注释或语法，已使用文本编辑保留原文');
+        }
       }
       setLoadedFromServer(prev => ({ ...prev, [tab]: true }));
     } catch (e: unknown) {
       const message = getErrorMessage(e);
+      if (message.includes('not found') || message.includes('404')) {
+        if (tab === 'unbound_custom') {
+          setUnboundContent('');
+        } else if (tab === 'custom_mod') {
+          setCustomModContent('');
+          setCustomModDirty(false);
+          setCustomModVisualSafe(true);
+          setCustomModZones([]);
+          setCustomModSwaps([]);
+          setCustomModHosts([]);
+        } else {
+          setCustomEnvContent('');
+          setCustomEnvDirty(false);
+          setCustomEnvVisualSafe(true);
+          useStore.getState().setCustomEnvEntries([]);
+        }
+      }
       if (!message.includes('not found') && !message.includes('404')) {
         showToast(`读取 ${filename} 失败: ${message}`);
       }
@@ -178,6 +226,50 @@ export default function AdvancedConfigPage() {
     if (!customModVisualSafe) return customModContent;
     if (!customModDirty) return customModContent;
     return hasCustomModVisualEntries ? generateCustomModYaml() : '';
+  };
+
+  const getCustomEnvOutput = () => {
+    if (customEnvEditMode === 'text') return customEnvContent;
+    if (!customEnvDirty) return customEnvContent;
+    return generateCustomEnvIni();
+  };
+
+  const switchCustomEnvEditMode = (mode: CustomEnvEditMode) => {
+    if (mode === customEnvEditMode) return;
+    if (mode === 'visual') {
+      const parsed = parseCustomEnv(customEnvContent);
+      if (!parsed.visualSafe) {
+        setCustomEnvVisualSafe(false);
+        showToast('当前 custom_env.ini 含有可视化编辑无法保留的注释或语法，请使用文本编辑保存原文');
+        return;
+      }
+      const store = useStore.getState();
+      store.setCustomEnvEntries(parsed.entries);
+      setCustomEnvVisualSafe(true);
+    } else {
+      setCustomEnvContent(customEnvDirty ? generateCustomEnvIni() : customEnvContent);
+    }
+    setCustomEnvEditMode(mode);
+  };
+
+  const addEnvEntry = () => {
+    setCustomEnvDirty(true);
+    addCustomEnv({ key: '', value: '', enabled: true });
+  };
+
+  const updateEnvEntry = (index: number, entry: CustomEnvEntry) => {
+    setCustomEnvDirty(true);
+    updateCustomEnv(index, entry);
+  };
+
+  const removeEnvEntry = (index: number) => {
+    setCustomEnvDirty(true);
+    removeCustomEnv(index);
+  };
+
+  const updateCustomEnvText = (content: string) => {
+    setCustomEnvContent(content);
+    setCustomEnvVisualSafe(parseCustomEnv(content).visualSafe);
   };
 
   const addZone = () => {
@@ -227,7 +319,7 @@ export default function AdvancedConfigPage() {
 
   const getActiveOutput = (): { filename: string; content: string } => {
     if (activeSubTab === 'custom_env') {
-      return { filename: 'custom_env.ini', content: generateCustomEnvIni() };
+      return { filename: 'custom_env.ini', content: getCustomEnvOutput() };
     }
     if (activeSubTab === 'custom_mod') {
       return { filename: 'custom_mod.yaml', content: getCustomModOutput() };
@@ -257,6 +349,9 @@ export default function AdvancedConfigPage() {
       if (activeSubTab === 'custom_mod') {
         setCustomModContent(content);
         setCustomModDirty(false);
+      } else if (activeSubTab === 'custom_env') {
+        setCustomEnvContent(content);
+        setCustomEnvDirty(false);
       }
       showToast('配置已保存');
     } catch (e: unknown) {
@@ -326,24 +421,48 @@ export default function AdvancedConfigPage() {
             在此定义的变量会覆盖 Docker 启动时的环境变量，修改后 MosDNS 会自动重载。格式：key="value"
           </div>
 
-          {customEnvEntries.map((entry, i) => (
-            <div className="domain-entry" key={i} style={{ marginBottom: 8 }}>
-              <input className="form-input" style={{ width: 180, flexShrink: 0 }} type="text" value={entry.key} placeholder="VARIABLE_NAME" onChange={(e) => updateCustomEnv(i, { ...entry, key: e.target.value })} />
-              <input className="form-input" type="text" value={entry.value} placeholder="value" onChange={(e) => updateCustomEnv(i, { ...entry, value: e.target.value })} />
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap', cursor: 'pointer' }}>
-                <input type="checkbox" checked={entry.enabled} onChange={(e) => updateCustomEnv(i, { ...entry, enabled: e.target.checked })} />启用
-              </label>
-              <button className="domain-remove-btn" onClick={() => removeCustomEnv(i)}><X size={16} /></button>
-            </div>
-          ))}
-
-          <div className="inline-actions">
-            <button className="btn btn-secondary btn-sm" onClick={() => addCustomEnv({ key: '', value: '', enabled: true })}><Plus size={14} /> 添加变量</button>
+          <div className="tab-bar" style={{ marginBottom: 16 }}>
+            <button className={`tab-item ${customEnvEditMode === 'text' ? 'active' : ''}`} onClick={() => switchCustomEnvEditMode('text')}>文本编辑</button>
+            <button
+              className={`tab-item ${customEnvEditMode === 'visual' ? 'active' : ''}`}
+              onClick={() => switchCustomEnvEditMode('visual')}
+              disabled={!customEnvVisualSafe}
+              title={!customEnvVisualSafe ? '当前文件含有可视化编辑无法保留的注释或语法' : undefined}
+            >
+              可视化编辑
+            </button>
           </div>
+
+          {!customEnvVisualSafe && (
+            <div className="card-desc" style={{ marginBottom: 16, color: 'var(--accent-amber)' }}>
+              当前 custom_env.ini 含有可视化编辑无法无损保留的注释或语法，已使用文本编辑以避免保存时重写原文件。
+            </div>
+          )}
+
+          {customEnvEditMode === 'visual' ? (
+            <>
+              {customEnvEntries.map((entry, i) => (
+                <div className="domain-entry" key={i} style={{ marginBottom: 8 }}>
+                  <input className="form-input" style={{ width: 180, flexShrink: 0 }} type="text" value={entry.key} placeholder="VARIABLE_NAME" onChange={(e) => updateEnvEntry(i, { ...entry, key: e.target.value })} />
+                  <input className="form-input" type="text" value={entry.value} placeholder="value" onChange={(e) => updateEnvEntry(i, { ...entry, value: e.target.value })} />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={entry.enabled} onChange={(e) => updateEnvEntry(i, { ...entry, enabled: e.target.checked })} />启用
+                  </label>
+                  <button className="domain-remove-btn" onClick={() => removeEnvEntry(i)}><X size={16} /></button>
+                </div>
+              ))}
+
+              <div className="inline-actions">
+                <button className="btn btn-secondary btn-sm" onClick={addEnvEntry}><Plus size={14} /> 添加变量</button>
+              </div>
+            </>
+          ) : (
+            <textarea className="textarea-code" value={customEnvContent} onChange={(e) => updateCustomEnvText(e.target.value)} rows={15} />
+          )}
 
           <div style={{ marginTop: 20, borderTop: '1px solid var(--border-color)', paddingTop: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>生成预览</div>
-            <div className="preview-shell command-box"><div className="code-content" style={{ padding: 12, fontSize: 12 }}>{generateCustomEnvIni()}</div></div>
+            <div className="preview-shell command-box"><div className="code-content" style={{ padding: 12, fontSize: 12 }}>{getCustomEnvOutput()}</div></div>
           </div>
         </div>
       )}

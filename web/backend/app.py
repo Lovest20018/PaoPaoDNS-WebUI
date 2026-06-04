@@ -9,6 +9,7 @@ import os
 import shutil
 import re
 import hmac
+import threading
 from flask import Flask, jsonify, request, send_from_directory
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -71,6 +72,7 @@ ALLOWED_FILES = (
     | RELOAD_REQUIRED_FILES
     | RESTART_REQUIRED_FILES
 )
+WRITE_LOCKS = {filename: threading.Lock() for filename in ALLOWED_FILES}
 
 
 def _check_auth() -> bool:
@@ -209,25 +211,53 @@ def _atomic_write(filename: str, content: str) -> tuple[bool, str]:
     if len(content.encode("utf-8")) > limit:
         return False, f"Content exceeds size limit ({limit // 1024}KB)"
 
+    lock = WRITE_LOCKS[filename]
     try:
-        dir_name = os.path.dirname(path)
-        os.makedirs(dir_name, exist_ok=True)
+        with lock:
+            dir_name = os.path.dirname(path)
+            os.makedirs(dir_name, exist_ok=True)
 
-        # Backup existing file via copy (do NOT move — avoids missing-file window)
-        if os.path.exists(path):
+            existed_before = os.path.exists(path)
+            original_bytes = b""
+            if existed_before:
+                try:
+                    with open(path, "rb") as original:
+                        original_bytes = original.read()
+                except Exception:
+                    original_bytes = b""
+
+                # Backup existing file via copy (do NOT move — avoids missing-file window)
+                try:
+                    shutil.copy2(path, path + ".bak")
+                except Exception:
+                    pass  # Non-fatal: backup failure shouldn't block write
+
             try:
-                shutil.copy2(path, path + ".bak")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
             except Exception:
-                pass  # Non-fatal: backup failure shouldn't block write
-
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        return True, ""
+                _restore_failed_write(path, existed_before, original_bytes)
+                raise
+            return True, ""
 
     except Exception as e:
         return False, str(e)
+
+
+def _restore_failed_write(path: str, existed_before: bool, original_bytes: bytes) -> None:
+    """Best-effort rollback when direct truncate/write fails."""
+    try:
+        if existed_before:
+            with open(path, "wb") as f:
+                f.write(original_bytes)
+                f.flush()
+                os.fsync(f.fileno())
+        elif os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
 
 
 def _parse_env_from_custom_ini() -> dict:

@@ -44,17 +44,13 @@ const DEFAULT_ENV_VALUES: Record<string, string> = Object.fromEntries(
   ENV_VARS.map((envVar) => [envVar.key, envVar.defaultValue])
 );
 
-function withDefaultEnvValues(envVars: Record<string, string>): Record<string, string> {
-  return { ...DEFAULT_ENV_VALUES, ...envVars };
-}
-
 const DEFAULT_COMPOSE_CONFIG: ComposeConfig = {
   serviceName: 'paopaodns',
   containerName: 'paopaodns',
   image: 'sliamb/paopaodns:latest',
   restart: 'always',
   dataPath: '/home/mydata',
-  envVars: { ...DEFAULT_ENV_VALUES },
+  envVars: {},
   ports: DEFAULT_PORTS,
   network: '',
   cpus: '',
@@ -157,7 +153,7 @@ function generateDockerCompose(config: ComposeConfig): string {
 }
 
 export default function DeployPage() {
-  const { envValues, envLoaded } = useStore();
+  const { envLoaded } = useStore();
   const { showToast, ToastComponent } = useToast();
   const envTouchedRef = useRef(false);
   const [activeTab, setActiveTab] = useState<OutputTab>('docker-compose');
@@ -165,7 +161,7 @@ export default function DeployPage() {
 
   const [config, setConfig] = useState<ComposeConfig>(() => ({
     ...DEFAULT_COMPOSE_CONFIG,
-    envVars: withDefaultEnvValues(envValues),
+    envVars: {},
   }));
 
   const envLoadedOnInitRef = useRef(false);
@@ -177,10 +173,10 @@ export default function DeployPage() {
       envLoadedOnInitRef.current = true;
       api.getEnv().then((env) => {
         if (!envTouchedRef.current) {
-          setConfig((prev) => ({ ...prev, envVars: withDefaultEnvValues(env) }));
+          setConfig((prev) => ({ ...prev, envVars: { ...env } }));
         }
       }).catch(() => {
-        // Keep the editable defaults if the optional environment refresh fails.
+        // Keep the editable values if the optional environment refresh fails.
       });
     }, 0);
     return () => window.clearTimeout(timer);
@@ -274,7 +270,7 @@ export default function DeployPage() {
         </div>
         <div className="card-desc">
           此页面用于生成 <strong>新的部署配置</strong>，不会修改原 PaoPaoDNS 项目的任何文件。<br />
-          下方环境变量会默认展开为 PaoPaoDNS 的完整默认配置；如果 data/custom_env.ini 已存在覆盖值，会优先带入这些值。<br />
+          下方环境变量默认只输出 data/custom_env.ini 中的覆盖值，避免把当前前端维护的默认值固化到新容器。需要完整显式环境变量时可点击“展开全部默认变量”。<br />
           Web UI 无法直接读取当前容器启动时的 Docker 环境变量；这里编辑的是用于新建容器/重新部署导出的配置。
         </div>
       </div>
@@ -424,11 +420,11 @@ export default function DeployPage() {
           <div className="form-panel">
             <div className="card-title">环境变量</div>
             <div className="card-desc">
-              这里列出全部 PaoPaoDNS 启动环境变量，默认值已填好；生成 docker-compose 或 docker run 时会写入当前值。需要不传某个变量时可删除，误删后可恢复默认变量。
+              这里列出 PaoPaoDNS 常用启动环境变量。未添加的变量生成时不会传递，容器会使用镜像自身默认值；已添加的变量会写入 docker-compose 或 docker run。
             </div>
             <div className="inline-actions">
               <button className="btn btn-secondary btn-sm" onClick={restoreDefaultEnvVars}>
-                恢复默认变量
+                展开全部默认变量
               </button>
             </div>
             {ENV_VARS.map((envVar, index) => {
