@@ -218,11 +218,12 @@ def _atomic_write(filename: str, content: str) -> tuple[bool, str]:
             os.makedirs(dir_name, exist_ok=True)
 
             existed_before = os.path.exists(path)
-            original_bytes = b""
+            read_ok = False
             if existed_before:
                 try:
                     with open(path, "rb") as original:
                         original_bytes = original.read()
+                    read_ok = True
                 except Exception:
                     original_bytes = b""
 
@@ -238,7 +239,7 @@ def _atomic_write(filename: str, content: str) -> tuple[bool, str]:
                     f.flush()
                     os.fsync(f.fileno())
             except Exception:
-                _restore_failed_write(path, existed_before, original_bytes)
+                _restore_failed_write(path, existed_before, original_bytes, read_ok)
                 raise
             return True, ""
 
@@ -246,15 +247,22 @@ def _atomic_write(filename: str, content: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def _restore_failed_write(path: str, existed_before: bool, original_bytes: bytes) -> None:
-    """Best-effort rollback when direct truncate/write fails."""
+def _restore_failed_write(path: str, existed_before: bool, original_bytes: bytes, read_ok: bool = True) -> None:
+    """Best-effort rollback when direct truncate/write fails.
+
+    Priority: in-memory bytes (if read succeeded) → .bak copy → last resort: leave as-is.
+    """
     try:
-        if existed_before:
+        if existed_before and read_ok and original_bytes:
             with open(path, "wb") as f:
                 f.write(original_bytes)
                 f.flush()
                 os.fsync(f.fileno())
-        elif os.path.exists(path):
+            return
+        if existed_before and os.path.exists(path + ".bak"):
+            shutil.copy2(path + ".bak", path)
+            return
+        if not existed_before and os.path.exists(path):
             os.remove(path)
     except Exception:
         pass

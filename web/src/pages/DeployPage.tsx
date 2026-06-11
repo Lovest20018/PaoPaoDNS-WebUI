@@ -176,7 +176,7 @@ export default function DeployPage() {
           setConfig((prev) => ({ ...prev, envVars: { ...env } }));
         }
       }).catch(() => {
-        // Keep the editable values if the optional environment refresh fails.
+        showToast('读取环境变量失败，生成的配置将不包含环境变量，可点击"展开全部默认变量"手动添加');
       });
     }, 0);
     return () => window.clearTimeout(timer);

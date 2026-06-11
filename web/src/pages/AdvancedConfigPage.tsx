@@ -35,6 +35,10 @@ function parseCustomEnv(content: string): CustomEnvParseResult {
       const uncommented = trimmed.replace(/^#+\s*/, '');
       const match = uncommented.match(/^([_a-zA-Z0-9]+)="(.*)"$/);
       if (match) {
+        // Greedy regex: if value contains inner quotes, round-trip will be lossy
+        if (match[2].includes('"')) {
+          visualSafe = false;
+        }
         entries.push({ key: match[1], value: match[2], enabled: false });
       } else if (!CUSTOM_ENV_VISUAL_HEADER_LINES.has(trimmed)) {
         visualSafe = false;
@@ -43,6 +47,10 @@ function parseCustomEnv(content: string): CustomEnvParseResult {
     }
     const match = trimmed.match(/^([_a-zA-Z0-9]+)="(.*)"$/);
     if (match) {
+      // Greedy regex: if value contains inner quotes, round-trip will be lossy
+      if (match[2].includes('"')) {
+        visualSafe = false;
+      }
       entries.push({ key: match[1], value: match[2], enabled: true });
     } else {
       visualSafe = false;

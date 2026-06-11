@@ -36,6 +36,8 @@ function parseTtlRules(content: string): TtlRuleParseResult {
   const entries: TtlRuleEntry[] = [];
   let id = 0;
   let visualSafe = true;
+  const ipv4Like = (s: string) => /^\d{1,3}(\.\d{1,3}){1,3}$/.test(s);
+  const ipv6Like = (s: string) => /^[0-9a-fA-F:]+$/.test(s) && s.includes(':');
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -48,10 +50,22 @@ function parseTtlRules(content: string): TtlRuleParseResult {
 
     if (trimmed.includes('@@@')) {
       const [domain, record] = trimmed.split('@@@');
-      entries.push({ id: id++, domain: domain.trim(), server: '', type: record.includes('.') && !record.match(/^\d/) ? 'cname' : 'record', matchMode: 'exact', record: record.trim() });
+      const r = record.trim();
+      const isIp = ipv4Like(r) || ipv6Like(r);
+      const isDomain = r.includes('.') && !isIp;
+      if (!isIp && !isDomain) {
+        visualSafe = false;
+      }
+      entries.push({ id: id++, domain: domain.trim(), server: '', type: isDomain ? 'cname' : 'record', matchMode: 'exact', record: r });
     } else if (trimmed.includes('@@')) {
       const [domain, record] = trimmed.split('@@');
-      entries.push({ id: id++, domain: domain.trim(), server: '', type: record.includes('.') && !record.match(/^\d/) ? 'cname' : 'record', matchMode: 'subdomain', record: record.trim() });
+      const r = record.trim();
+      const isIp = ipv4Like(r) || ipv6Like(r);
+      const isDomain = r.includes('.') && !isIp;
+      if (!isIp && !isDomain) {
+        visualSafe = false;
+      }
+      entries.push({ id: id++, domain: domain.trim(), server: '', type: isDomain ? 'cname' : 'record', matchMode: 'subdomain', record: r });
     } else if (trimmed.includes('@')) {
       const [domain, serverPart] = trimmed.split('@');
       entries.push({ id: id++, domain: domain.trim(), server: serverPart?.trim() || '', type: 'forward' });
