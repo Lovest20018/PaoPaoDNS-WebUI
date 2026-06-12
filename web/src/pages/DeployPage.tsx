@@ -42,6 +42,7 @@ interface WebUiConfig {
   restart: string;
   host: string;
   hostPort: string;
+  dnsTestServer: string;
   token: string;
   mirrorRuntimeEnv: boolean;
 }
@@ -82,6 +83,7 @@ const DEFAULT_COMPOSE_CONFIG: ComposeConfig = {
     restart: 'always',
     host: '127.0.0.1',
     hostPort: '8080',
+    dnsTestServer: '',
     token: '${WEB_UI_TOKEN:?set WEB_UI_TOKEN}',
     mirrorRuntimeEnv: true,
   },
@@ -132,9 +134,22 @@ function webUiPortMapping(config: ComposeConfig): string {
   return `${hostPrefix}${config.webUi.hostPort || '8080'}:8080`;
 }
 
+function webUiDnsTestServer(config: ComposeConfig): string {
+  const customServer = config.webUi.dnsTestServer.trim();
+  if (customServer) return customServer;
+  return config.deploymentMode === 'full' ? slugifyServiceName(config.serviceName) : 'paopaodns';
+}
+
+function dockerRunNetwork(config: ComposeConfig): string {
+  const customNetwork = config.network.trim();
+  if (customNetwork) return customNetwork;
+  return config.deploymentMode === 'full' ? `${slugifyServiceName(config.serviceName)}-net` : '';
+}
+
 function buildWebUiEnvironment(config: ComposeConfig): Record<string, string> {
   const environment: Record<string, string> = {
     DATA_DIR: '/data',
+    DNS_TEST_SERVER: webUiDnsTestServer(config),
     WEB_UI_TOKEN: config.webUi.token,
   };
 
@@ -151,6 +166,7 @@ function buildWebUiEnvironment(config: ComposeConfig): Record<string, string> {
 
 function generateMainDockerRun(config: ComposeConfig): string {
   const parts: string[] = ['docker run -d'];
+  const network = dockerRunNetwork(config);
   parts.push(`--name ${shellQuote(config.containerName)}`);
   parts.push(`-v ${shellQuote(dataVolumeSpec(config))}`);
 
@@ -169,8 +185,9 @@ function generateMainDockerRun(config: ComposeConfig): string {
     }
   });
 
-  if (config.network) {
-    parts.push(`--network ${shellQuote(config.network)}`);
+  if (network) {
+    parts.push(`--network ${shellQuote(network)}`);
+    parts.push(`--network-alias ${shellQuote(slugifyServiceName(config.serviceName))}`);
   }
 
   if (config.cpus) {
@@ -187,6 +204,7 @@ function generateMainDockerRun(config: ComposeConfig): string {
 
 function generateWebUiDockerRun(config: ComposeConfig): string {
   const parts: string[] = ['docker run -d'];
+  const network = dockerRunNetwork(config);
   parts.push(`--name ${shellQuote(config.webUi.containerName)}`);
   parts.push(`-v ${shellQuote(dataVolumeSpec(config))}`);
   Object.entries(buildWebUiEnvironment(config)).forEach(([k, v]) => {
@@ -194,8 +212,8 @@ function generateWebUiDockerRun(config: ComposeConfig): string {
   });
   parts.push(`--restart ${shellQuote(config.webUi.restart)}`);
   parts.push(`-p ${shellQuote(webUiPortMapping(config))}`);
-  if (config.network) {
-    parts.push(`--network ${shellQuote(config.network)}`);
+  if (network) {
+    parts.push(`--network ${shellQuote(network)}`);
   }
   parts.push(shellQuote(config.webUi.image));
   return parts.join(DOCKER_RUN_SEPARATOR);
@@ -204,6 +222,13 @@ function generateWebUiDockerRun(config: ComposeConfig): string {
 function generateDockerRun(config: ComposeConfig): string {
   const commands: string[] = [];
   if (config.deploymentMode === 'full') {
+    if (!config.network.trim()) {
+      const network = dockerRunNetwork(config);
+      commands.push(
+        '# 创建专用网络，确保两个容器可以通过服务名互相解析',
+        `docker network inspect ${shellQuote(network)} >/dev/null 2>&1 || docker network create ${shellQuote(network)}`
+      );
+    }
     commands.push('# PaoPaoDNS 主容器', generateMainDockerRun(config));
     if (config.webUi.enabled) {
       commands.push('# Web UI sidecar', generateWebUiDockerRun(config));
@@ -695,6 +720,18 @@ export default function DeployPage() {
                   placeholder="127.0.0.1，留空则绑定所有地址"
                 />
               </div>
+              <div className="form-group">
+                <label className="form-label">DNS 诊断目标</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={config.webUi.dnsTestServer}
+                  onChange={(e) => updateWebUi('dnsTestServer', e.target.value)}
+                  placeholder={config.deploymentMode === 'full' ? `${slugifyServiceName(config.serviceName)} (自动)` : 'paopaodns'}
+                />
+              </div>
+            </div>
+            <div className="form-row">
               <div className="form-group">
                 <label className="form-label">宿主机端口</label>
                 <input
