@@ -962,6 +962,30 @@ body {
   flex-wrap: wrap;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.checkbox-row input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-blue);
+}
+
+.deploy-checkbox-row {
+  align-self: end;
+  min-height: 42px;
+}
+
 @media (max-width: 900px) {
   .domain-editor-toolbar {
     flex-direction: column;

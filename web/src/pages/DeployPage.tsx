@@ -8,6 +8,8 @@ import YAML from 'yaml';
 
 type OutputTab = 'docker-run' | 'docker-compose';
 type ComposeEditMode = 'preview' | 'edit';
+type DeploymentMode = 'full' | 'sidecar';
+type DataMountType = 'bind' | 'volume';
 
 interface PortMapping {
   id: number;
@@ -17,16 +19,31 @@ interface PortMapping {
 }
 
 interface ComposeConfig {
+  deploymentMode: DeploymentMode;
   serviceName: string;
   containerName: string;
   image: string;
   restart: string;
+  dataMountType: DataMountType;
   dataPath: string;
   envVars: Record<string, string>;
   ports: PortMapping[];
   network: string;
   cpus: string;
   memory: string;
+  webUi: WebUiConfig;
+}
+
+interface WebUiConfig {
+  enabled: boolean;
+  serviceName: string;
+  containerName: string;
+  image: string;
+  restart: string;
+  host: string;
+  hostPort: string;
+  token: string;
+  mirrorRuntimeEnv: boolean;
 }
 
 let portIdCounter = 1;
@@ -45,17 +62,35 @@ const DEFAULT_ENV_VALUES: Record<string, string> = Object.fromEntries(
 );
 
 const DEFAULT_COMPOSE_CONFIG: ComposeConfig = {
+  deploymentMode: 'full',
   serviceName: 'paopaodns',
   containerName: 'paopaodns',
   image: 'sliamb/paopaodns:latest',
   restart: 'always',
+  dataMountType: 'bind',
   dataPath: '/home/mydata',
   envVars: {},
   ports: DEFAULT_PORTS,
   network: '',
   cpus: '',
   memory: '',
+  webUi: {
+    enabled: true,
+    serviceName: 'paopaodns-web',
+    containerName: 'paopaodns-web',
+    image: 'ghcr.io/lovest20018/paopaodns-webui:latest',
+    restart: 'always',
+    host: '127.0.0.1',
+    hostPort: '8080',
+    token: '${WEB_UI_TOKEN:?set WEB_UI_TOKEN}',
+    mirrorRuntimeEnv: true,
+  },
 };
+
+const WEB_UI_MIRRORED_ENV_KEYS = ['TZ', 'CNAUTO', 'CNFALL', 'IPV6', 'CN_TRACKER', 'USE_MARK_DATA', 'CUSTOM_FORWARD', 'RULES_TTL'];
+const DOCKER_RUN_SEPARATOR = ' \\' + '\n  ';
+const DEFAULT_BIND_DATA_PATH = '/home/mydata';
+const DEFAULT_VOLUME_NAME = 'paopaodns-data';
 
 function slugifyServiceName(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'paopaodns';
@@ -65,13 +100,62 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function generateDockerRun(config: ComposeConfig): string {
+function isShellParameterExpansion(value: string): boolean {
+  return /^\$\{[A-Za-z_][A-Za-z0-9_]*(?::[?+\-=][^}]*)?\}$/.test(value);
+}
+
+function dockerEnvFlag(key: string, value: string): string {
+  if (isShellParameterExpansion(value)) {
+    return `-e ${key}=${value}`;
+  }
+  return `-e ${shellQuote(`${key}=${value}`)}`;
+}
+
+function normalizeVolumeName(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith('/') || trimmed.includes('\\') || trimmed.includes(':')) {
+    return DEFAULT_VOLUME_NAME;
+  }
+  return trimmed.replace(/[^a-zA-Z0-9_.-]/g, '-') || DEFAULT_VOLUME_NAME;
+}
+
+function dataSource(config: ComposeConfig): string {
+  return config.dataMountType === 'volume' ? normalizeVolumeName(config.dataPath) : config.dataPath;
+}
+
+function dataVolumeSpec(config: ComposeConfig): string {
+  return `${dataSource(config)}:/data`;
+}
+
+function webUiPortMapping(config: ComposeConfig): string {
+  const hostPrefix = config.webUi.host.trim() ? `${config.webUi.host.trim()}:` : '';
+  return `${hostPrefix}${config.webUi.hostPort || '8080'}:8080`;
+}
+
+function buildWebUiEnvironment(config: ComposeConfig): Record<string, string> {
+  const environment: Record<string, string> = {
+    DATA_DIR: '/data',
+    WEB_UI_TOKEN: config.webUi.token,
+  };
+
+  if (config.webUi.mirrorRuntimeEnv) {
+    WEB_UI_MIRRORED_ENV_KEYS.forEach((key) => {
+      if (config.envVars[key] !== undefined) {
+        environment[key] = config.envVars[key];
+      }
+    });
+  }
+
+  return environment;
+}
+
+function generateMainDockerRun(config: ComposeConfig): string {
   const parts: string[] = ['docker run -d'];
   parts.push(`--name ${shellQuote(config.containerName)}`);
-  parts.push(`-v ${shellQuote(`${config.dataPath}:/data`)}`);
+  parts.push(`-v ${shellQuote(dataVolumeSpec(config))}`);
 
   Object.entries(config.envVars).forEach(([k, v]) => {
-    parts.push(`-e ${shellQuote(`${k}=${v}`)}`);
+    parts.push(dockerEnvFlag(k, v));
   });
 
   parts.push(`--restart ${shellQuote(config.restart)}`);
@@ -101,16 +185,50 @@ function generateDockerRun(config: ComposeConfig): string {
   return parts.join(' \\\n  ');
 }
 
+function generateWebUiDockerRun(config: ComposeConfig): string {
+  const parts: string[] = ['docker run -d'];
+  parts.push(`--name ${shellQuote(config.webUi.containerName)}`);
+  parts.push(`-v ${shellQuote(dataVolumeSpec(config))}`);
+  Object.entries(buildWebUiEnvironment(config)).forEach(([k, v]) => {
+    parts.push(dockerEnvFlag(k, v));
+  });
+  parts.push(`--restart ${shellQuote(config.webUi.restart)}`);
+  parts.push(`-p ${shellQuote(webUiPortMapping(config))}`);
+  if (config.network) {
+    parts.push(`--network ${shellQuote(config.network)}`);
+  }
+  parts.push(shellQuote(config.webUi.image));
+  return parts.join(DOCKER_RUN_SEPARATOR);
+}
+
+function generateDockerRun(config: ComposeConfig): string {
+  const commands: string[] = [];
+  if (config.deploymentMode === 'full') {
+    commands.push('# PaoPaoDNS 主容器', generateMainDockerRun(config));
+    if (config.webUi.enabled) {
+      commands.push('# Web UI sidecar', generateWebUiDockerRun(config));
+    }
+  } else {
+    commands.push('# Web UI sidecar，接入已有 PaoPaoDNS /data', generateWebUiDockerRun(config));
+  }
+  return commands.join('\n\n');
+}
+
 function generateDockerCompose(config: ComposeConfig): string {
   const serviceName = slugifyServiceName(config.serviceName);
+  const requestedWebServiceName = slugifyServiceName(config.webUi.serviceName);
+  const webServiceName = config.deploymentMode === 'full' && requestedWebServiceName === serviceName
+    ? `${requestedWebServiceName}-web`
+    : requestedWebServiceName;
+  const serviceVolume = config.dataMountType === 'volume'
+    ? { type: 'volume', source: dataSource(config), target: '/data' }
+    : { type: 'bind', source: dataSource(config), target: '/data' };
 
   const service: Record<string, unknown> = {
     image: config.image,
     container_name: config.containerName,
     restart: config.restart,
-    volumes: [
-      { type: 'bind', source: config.dataPath, target: '/data' },
-    ],
+    volumes: [serviceVolume],
   };
 
   if (Object.keys(config.envVars).length > 0) {
@@ -141,12 +259,37 @@ function generateDockerCompose(config: ComposeConfig): string {
     service.deploy = { resources: { limits } };
   }
 
-  const doc: Record<string, unknown> = {
-    services: { [serviceName]: service },
-  };
+  const services: Record<string, unknown> = {};
+  if (config.deploymentMode === 'full') {
+    services[serviceName] = service;
+  }
+
+  if (config.deploymentMode === 'sidecar' || config.webUi.enabled) {
+    const webService: Record<string, unknown> = {
+      image: config.webUi.image,
+      container_name: config.webUi.containerName,
+      restart: config.webUi.restart,
+      volumes: [serviceVolume],
+      environment: buildWebUiEnvironment(config),
+      ports: [webUiPortMapping(config)],
+    };
+    if (config.network) {
+      webService.networks = [config.network];
+    }
+    if (config.deploymentMode === 'full') {
+      webService.depends_on = [serviceName];
+    }
+    services[webServiceName] = webService;
+  }
+
+  const doc: Record<string, unknown> = { services };
 
   if (config.network) {
     doc.networks = { [config.network]: { external: true } };
+  }
+
+  if (config.dataMountType === 'volume') {
+    doc.volumes = { [dataSource(config)]: {} };
   }
 
   return YAML.stringify(doc);
@@ -180,7 +323,7 @@ export default function DeployPage() {
       });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [envLoaded]);
+  }, [envLoaded, showToast]);
 
   const dockerRunCmd = generateDockerRun(config);
   const dockerComposeContent = generateDockerCompose(config);
@@ -247,6 +390,31 @@ export default function DeployPage() {
     });
   };
 
+  const updateWebUi = <K extends keyof WebUiConfig>(field: K, value: WebUiConfig[K]) => {
+    setConfig((prev) => ({
+      ...prev,
+      webUi: { ...prev.webUi, [field]: value },
+    }));
+  };
+
+  const updateDeploymentMode = (deploymentMode: DeploymentMode) => {
+    setConfig((prev) => ({
+      ...prev,
+      deploymentMode,
+      webUi: { ...prev.webUi, enabled: deploymentMode === 'sidecar' ? true : prev.webUi.enabled },
+    }));
+  };
+
+  const updateDataMountType = (dataMountType: DataMountType) => {
+    setConfig((prev) => ({
+      ...prev,
+      dataMountType,
+      dataPath: dataMountType === 'volume'
+        ? normalizeVolumeName(prev.dataPath)
+        : prev.dataPath === DEFAULT_VOLUME_NAME ? DEFAULT_BIND_DATA_PATH : prev.dataPath,
+    }));
+  };
+
   return (
     <div className="deploy-page">
       <div className="page-header">
@@ -257,10 +425,12 @@ export default function DeployPage() {
       </div>
 
       <div className="stack-actions" style={{ marginBottom: 16 }}>
-        <span className="summary-chip">服务 {slugifyServiceName(config.serviceName)}</span>
+        <span className="summary-chip">模式 {config.deploymentMode === 'full' ? '新建完整部署' : '仅 WebUI sidecar'}</span>
+        {config.deploymentMode === 'full' && <span className="summary-chip">主服务 {slugifyServiceName(config.serviceName)}</span>}
+        {(config.deploymentMode === 'sidecar' || config.webUi.enabled) && <span className="summary-chip">WebUI {slugifyServiceName(config.webUi.serviceName)}</span>}
         <span className="summary-chip">端口 {config.ports.length}</span>
         <span className="summary-chip">环境变量 {Object.keys(config.envVars).length}</span>
-        <span className="summary-chip">重启 {config.restart}</span>
+        <span className="summary-chip">数据 {config.dataMountType === 'volume' ? 'volume' : 'bind'}</span>
       </div>
 
       <div className="form-panel" style={{ borderColor: 'var(--accent-amber)' }}>
@@ -270,6 +440,7 @@ export default function DeployPage() {
         </div>
         <div className="card-desc">
           此页面用于生成 <strong>新的部署配置</strong>，不会修改原 PaoPaoDNS 项目的任何文件。<br />
+          可生成 PaoPaoDNS + Web UI 的完整部署，也可以只生成 Web UI sidecar 接入已有 PaoPaoDNS。<br />
           下方环境变量默认只输出 data/custom_env.ini 中的覆盖值，避免把当前前端维护的默认值固化到新容器。需要完整显式环境变量时可点击“展开全部默认变量”。<br />
           Web UI 无法直接读取当前容器启动时的 Docker 环境变量；这里编辑的是用于新建容器/重新部署导出的配置。
         </div>
@@ -297,10 +468,64 @@ export default function DeployPage() {
 
       {activeTab === 'docker-compose' && editMode === 'edit' ? (
         <>
+          <div className="form-panel">
+            <div className="card-title">部署模式和共享数据</div>
+            <div className="card-desc">
+              完整部署会同时生成 PaoPaoDNS 主容器和 Web UI sidecar；sidecar 模式只生成 Web UI，用来接入已有 PaoPaoDNS 的 /data。
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">部署模式</label>
+                <select
+                  className="form-select"
+                  value={config.deploymentMode}
+                  onChange={(e) => updateDeploymentMode(e.target.value as DeploymentMode)}
+                >
+                  <option value="full">新建 PaoPaoDNS + Web UI</option>
+                  <option value="sidecar">仅 Web UI sidecar，接入已有 PaoPaoDNS</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">/data 挂载类型</label>
+                <select
+                  className="form-select"
+                  value={config.dataMountType}
+                  onChange={(e) => updateDataMountType(e.target.value as DataMountType)}
+                >
+                  <option value="bind">宿主机目录 bind mount</option>
+                  <option value="volume">Docker named volume</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">{config.dataMountType === 'volume' ? 'Volume 名称' : '宿主机数据目录'}</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={config.dataPath}
+                  onChange={(e) => setConfig({ ...config, dataPath: e.target.value })}
+                  placeholder={config.dataMountType === 'volume' ? 'paopaodns-data' : '/home/mydata'}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">网络</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={config.network}
+                  onChange={(e) => setConfig({ ...config, network: e.target.value })}
+                  placeholder="留空使用默认网络"
+                />
+              </div>
+            </div>
+          </div>
+
+          {config.deploymentMode === 'full' && (
           <div className="split-card-grid">
           {/* Basic Settings */}
           <div className="form-panel deploy-basic-panel">
-            <div className="card-title">基础配置</div>
+            <div className="card-title">PaoPaoDNS 主容器</div>
             <div className="form-row">
               <div className="form-group">
                 <label className="form-label">服务名称 <span className="form-hint" style={{ display: 'inline' }}>(Compose service key)</span></label>
@@ -348,26 +573,7 @@ export default function DeployPage() {
               </div>
             </div>
             <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">数据目录路径</label>
-                <input
-                  className="form-input"
-                  type="text"
-                  value={config.dataPath}
-                  onChange={(e) => setConfig({ ...config, dataPath: e.target.value })}
-                  placeholder="/home/mydata"
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">网络</label>
-                <input
-                  className="form-input"
-                  type="text"
-                  value={config.network}
-                  onChange={(e) => setConfig({ ...config, network: e.target.value })}
-                  placeholder="留空使用默认网络"
-                />
-              </div>
+              <div className="form-hint">主容器和 Web UI 会共用上方配置的 /data 挂载。</div>
             </div>
           </div>
 
@@ -414,6 +620,112 @@ export default function DeployPage() {
               </button>
             </div>
           </div>
+          </div>
+          )}
+
+          <div className="form-panel">
+            <div className="card-title">Web UI sidecar</div>
+            <div className="card-desc">
+              Web UI 只读写共享 /data，不挂载 Docker socket。建议默认绑定到 127.0.0.1，并通过反向代理提供公网访问。
+            </div>
+            {config.deploymentMode === 'full' && (
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={config.webUi.enabled}
+                  onChange={(e) => updateWebUi('enabled', e.target.checked)}
+                />
+                <span>在完整部署中包含 Web UI 管理面板</span>
+              </label>
+            )}
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">服务名称</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={config.webUi.serviceName}
+                  onChange={(e) => updateWebUi('serviceName', e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
+                  placeholder="paopaodns-web"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">容器名称</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={config.webUi.containerName}
+                  onChange={(e) => updateWebUi('containerName', e.target.value)}
+                  placeholder="paopaodns-web"
+                />
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Web UI 镜像</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={config.webUi.image}
+                  onChange={(e) => updateWebUi('image', e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">重启策略</label>
+                <select
+                  className="form-select"
+                  value={config.webUi.restart}
+                  onChange={(e) => updateWebUi('restart', e.target.value)}
+                >
+                  <option value="no">no</option>
+                  <option value="always">always</option>
+                  <option value="on-failure">on-failure</option>
+                  <option value="unless-stopped">unless-stopped</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">监听地址</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={config.webUi.host}
+                  onChange={(e) => updateWebUi('host', e.target.value)}
+                  placeholder="127.0.0.1，留空则绑定所有地址"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">宿主机端口</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={config.webUi.hostPort}
+                  onChange={(e) => updateWebUi('hostPort', e.target.value)}
+                  placeholder="8080"
+                />
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">WEB_UI_TOKEN</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={config.webUi.token}
+                  onChange={(e) => updateWebUi('token', e.target.value)}
+                  placeholder="${WEB_UI_TOKEN:?set WEB_UI_TOKEN}"
+                />
+              </div>
+              <label className="checkbox-row deploy-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={config.webUi.mirrorRuntimeEnv}
+                  onChange={(e) => updateWebUi('mirrorRuntimeEnv', e.target.checked)}
+                />
+                <span>同步关键 PaoPaoDNS 环境变量，用于 Web UI 判断热重载条件</span>
+              </label>
+            </div>
           </div>
 
           {/* Environment Variables */}
