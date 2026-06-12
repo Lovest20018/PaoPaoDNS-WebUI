@@ -51,7 +51,7 @@ PaoPaoDNS 的 Web 配置管理面板，以 sidecar 容器方式与 PaoPaoDNS 共
 ## 使用流程
 
 1. 部署 PaoPaoDNS 与 Web UI，并确认两个容器共享同一个 `/data` volume 或 bind mount。
-2. 访问 `http://127.0.0.1:8080`，输入 `WEB_UI_TOKEN` 完成鉴权。
+2. 访问 `http://宿主机IP:8080`，输入 `WEB_UI_TOKEN` 完成鉴权；本机访问也可使用 `http://127.0.0.1:8080`。
 3. 在「概览」确认 `/data` 可读写、文件存在状态和热重载条件。
 4. 在「域名列表」「TTL 规则」「高级配置」中编辑对应文件并保存。
 5. 根据保存后的提示判断配置是否已自动热重载；如果提示需要 reload 或重启，请在宿主机执行对应操作。
@@ -93,12 +93,12 @@ export WEB_UI_TOKEN=$(openssl rand -hex 32)
 docker compose -f docker-compose-web.yaml up -d
 
 # 打开浏览器
-# http://127.0.0.1:8080
+# http://宿主机IP:8080
 ```
 
 `docker-compose-web.yaml` 同时编排了 PaoPaoDNS 和 Web UI，共享同一个 data 卷。compose 文件会把关键运行环境变量同步给 Web UI 容器，用于更准确判断热重载条件。
 
-默认映射为 `127.0.0.1:8080:8080`。如果宿主机 `8080` 已被占用，只需要改冒号左侧的宿主机端口，例如 `127.0.0.1:8123:8080`；容器内端口 `8080` 保持不变。
+默认映射为 `8080:8080`，允许局域网或外部访问宿主机 `8080` 端口。如果宿主机 `8080` 已被占用，只需要改冒号左侧的宿主机端口，例如 `8123:8080`；容器内端口 `8080` 保持不变。若只希望本机访问，可改为 `127.0.0.1:8080:8080`。
 
 ### 方式二：给已有的 PaoPaoDNS 容器添加 Web UI
 
@@ -173,7 +173,7 @@ docker run -d \
   -e USE_MARK_DATA="${USE_MARK_DATA:-yes}" \
   -e CUSTOM_FORWARD="${CUSTOM_FORWARD:-}" \
   -e RULES_TTL="${RULES_TTL:-0}" \
-  -p 127.0.0.1:8080:8080 \
+  -p 8080:8080 \
   "$PAOPAODNS_WEB_IMAGE"
 ```
 
@@ -202,7 +202,7 @@ docker run -d \
   -e USE_MARK_DATA="${USE_MARK_DATA:-yes}" \
   -e CUSTOM_FORWARD="${CUSTOM_FORWARD:-}" \
   -e RULES_TTL="${RULES_TTL:-0}" \
-  -p 127.0.0.1:8080:8080 \
+  -p 8080:8080 \
   "$PAOPAODNS_WEB_IMAGE"
 ```
 
@@ -230,7 +230,7 @@ services:
       - CUSTOM_FORWARD=${CUSTOM_FORWARD:-}
       - RULES_TTL=${RULES_TTL:-0}
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8080:8080"
     depends_on:
       - paopaodns
 ```
@@ -297,7 +297,7 @@ Web UI 保存后会根据当前配置自动判断并提示热重载状态。由�
 - **写入大小限制** — 单次写入最大 2MB，按文件类型细分
 - **Token 鉴权** — 默认强制认证，仅支持 Bearer token
 - **敏感变量 mask** — 含 TOKEN/PASSWORD/SECRET/KEY 的值在 API 中显示为 `***`
-- **127.0.0.1 绑定** — 默认只监听本地，不直接暴露到网络
+- **端口暴露可控** — 默认示例暴露 `8080:8080` 便于局域网访问；只需本机访问时可改为 `127.0.0.1:8080:8080`
 
 ## 页面说明
 

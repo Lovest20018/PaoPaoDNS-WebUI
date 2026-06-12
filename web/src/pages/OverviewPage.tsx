@@ -7,6 +7,9 @@ import {
   FileText, HardDrive, Key, Eye, EyeOff, Search, Play, Server
 } from 'lucide-react';
 
+const DEFAULT_DNS_TEST_SERVER = 'paopaodns';
+const DEFAULT_DNS_TEST_PORT = 53;
+
 export default function OverviewPage() {
   const {
     envValues, filesExist, setConnected, setFilesExist, setEnvValues
@@ -22,14 +25,15 @@ export default function OverviewPage() {
   const [tokenVisible, setTokenVisible] = useState(false);
   const [dnsDomain, setDnsDomain] = useState('www.baidu.com');
   const [dnsRecordType, setDnsRecordType] = useState<'A' | 'AAAA' | 'CNAME'>('A');
-  const [dnsServer, setDnsServer] = useState('paopaodns');
-  const [dnsPort, setDnsPort] = useState('53');
+  const [dnsServer, setDnsServer] = useState(DEFAULT_DNS_TEST_SERVER);
+  const [dnsPort, setDnsPort] = useState(String(DEFAULT_DNS_TEST_PORT));
   const [dnsResult, setDnsResult] = useState<api.DnsTestResult | null>(null);
   const [healthResult, setHealthResult] = useState<api.HealthCheckResult | null>(null);
   const [dnsLoading, setDnsLoading] = useState(false);
   const [healthLoading, setHealthLoading] = useState(false);
   const [dnsError, setDnsError] = useState('');
   const loadStatusRef = useRef<() => Promise<void>>(async () => {});
+  const dnsTargetTouchedRef = useRef(false);
 
   const cnAutoEnabled = envValues.CNAUTO === 'yes';
 
@@ -44,6 +48,10 @@ export default function OverviewPage() {
       setDataWritable(status.data_writable);
       setDataReadable(status.data_readable);
       setAuthEnabled(status.auth_enabled);
+      if (!dnsTargetTouchedRef.current) {
+        setDnsServer(status.dns_test?.server || DEFAULT_DNS_TEST_SERVER);
+        setDnsPort(String(status.dns_test?.port || DEFAULT_DNS_TEST_PORT));
+      }
       // Extract watched_now and condition from files_info
       const info: Record<string, { watched_now: boolean; condition: string }> = {};
       for (const [f, v] of Object.entries(status.files_info)) {
@@ -76,7 +84,23 @@ export default function OverviewPage() {
 
   const parsedDnsPort = () => {
     const value = Number.parseInt(dnsPort, 10);
-    return Number.isFinite(value) ? value : 53;
+    return Number.isFinite(value) ? value : undefined;
+  };
+
+  const handleDnsServerChange = (value: string) => {
+    dnsTargetTouchedRef.current = true;
+    setDnsServer(value);
+    setDnsResult(null);
+    setHealthResult(null);
+    setDnsError('');
+  };
+
+  const handleDnsPortChange = (value: string) => {
+    dnsTargetTouchedRef.current = true;
+    setDnsPort(value);
+    setDnsResult(null);
+    setHealthResult(null);
+    setDnsError('');
   };
 
   const handleDnsLookup = async () => {
@@ -293,7 +317,7 @@ export default function OverviewPage() {
       {/* DNS Diagnostics */}
       <div className="card">
         <div className="card-title"><Search size={18} /> DNS 诊断</div>
-        <div className="card-desc">对目标 DNS 服务执行 A / AAAA / CNAME 查询和 CN/非 CN 健康检查</div>
+        <div className="card-desc">对后端配置的目标 DNS 服务执行 A / AAAA / CNAME 查询和 CN/非 CN 健康检查</div>
         <div className="dns-diagnostic-grid">
           <div className="dns-control-panel">
             <div className="form-row">
@@ -325,7 +349,7 @@ export default function OverviewPage() {
                 <input
                   className="form-input"
                   value={dnsServer}
-                  onChange={(e) => setDnsServer(e.target.value)}
+                  onChange={(e) => handleDnsServerChange(e.target.value)}
                   placeholder="paopaodns"
                 />
               </div>
@@ -337,7 +361,7 @@ export default function OverviewPage() {
                   min={1}
                   max={65535}
                   value={dnsPort}
-                  onChange={(e) => setDnsPort(e.target.value)}
+                  onChange={(e) => handleDnsPortChange(e.target.value)}
                   placeholder="53"
                 />
               </div>
@@ -349,7 +373,10 @@ export default function OverviewPage() {
               <button className="btn btn-secondary btn-sm" onClick={handleHealthCheck} disabled={healthLoading}>
                 {healthLoading ? <RefreshCw size={14} /> : <Play size={14} />} 健康检查
               </button>
-              <span className="summary-chip"><Server size={13} /> {dnsServer || 'paopaodns'}:{dnsPort || '53'}</span>
+              <span className="summary-chip"><Server size={13} /> {dnsServer || DEFAULT_DNS_TEST_SERVER}:{dnsPort || DEFAULT_DNS_TEST_PORT}</span>
+            </div>
+            <div className="floating-note">
+              默认来自后端 DNS_TEST_SERVER / DNS_TEST_PORT；单独部署时请填写 Web UI 容器可访问的 PaoPaoDNS 地址。
             </div>
             {dnsError && (
               <div className="overview-inline-warning">

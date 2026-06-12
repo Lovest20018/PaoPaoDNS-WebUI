@@ -59,7 +59,7 @@
 ## 使用流程
 
 1. 部署 PaoPaoDNS 与 Web UI，并确认两个容器共享同一个 `/data` volume 或 bind mount。
-2. 访问 `http://127.0.0.1:8080`，输入 `WEB_UI_TOKEN` 完成鉴权。
+2. 访问 `http://宿主机IP:8080`，输入 `WEB_UI_TOKEN` 完成鉴权；本机访问也可使用 `http://127.0.0.1:8080`。
 3. 在「概览」确认 `/data` 可读写、文件存在状态和热重载条件。
 4. 如需排查 DNS 可用性，可在「概览」的 DNS 诊断中测试 `A` / `AAAA` / `CNAME` 查询和 CN/非 CN 健康检查。
 5. 在「域名列表」「TTL 规则」「高级配置」中编辑对应文件并保存。
@@ -94,12 +94,12 @@ docker compose -f docker-compose-web.yaml up -d
 启动后访问：
 
 ```text
-http://127.0.0.1:8080
+http://宿主机IP:8080
 ```
 
 登录时使用刚才生成的 `WEB_UI_TOKEN`。
 
-默认映射为 `127.0.0.1:8080:8080`。如果宿主机 `8080` 已被占用，只需要改冒号左侧的宿主机端口，例如 `127.0.0.1:8123:8080`；容器内端口 `8080` 保持不变。
+默认映射为 `8080:8080`，允许局域网或外部访问宿主机 `8080` 端口。如果宿主机 `8080` 已被占用，只需要改冒号左侧的宿主机端口，例如 `8123:8080`；容器内端口 `8080` 保持不变。若只希望本机访问，可改为 `127.0.0.1:8080:8080`。
 
 `docker-compose-web.yaml` 会创建两个服务：
 
@@ -193,7 +193,7 @@ docker run -d \
   -e USE_MARK_DATA="${USE_MARK_DATA:-yes}" \
   -e CUSTOM_FORWARD="${CUSTOM_FORWARD:-}" \
   -e RULES_TTL="${RULES_TTL:-0}" \
-  -p 127.0.0.1:8080:8080 \
+  -p 8080:8080 \
   "$PAOPAODNS_WEB_IMAGE"
 ```
 
@@ -225,7 +225,7 @@ docker run -d \
   -e USE_MARK_DATA="${USE_MARK_DATA:-yes}" \
   -e CUSTOM_FORWARD="${CUSTOM_FORWARD:-}" \
   -e RULES_TTL="${RULES_TTL:-0}" \
-  -p 127.0.0.1:8080:8080 \
+  -p 8080:8080 \
   "$PAOPAODNS_WEB_IMAGE"
 ```
 
@@ -330,7 +330,8 @@ example.com@@@target.example.net
 ## 安全建议
 
 - 一定要设置 `WEB_UI_TOKEN`。
-- 默认端口建议绑定到 `127.0.0.1:8080`。
+- 默认示例会暴露宿主机 `8080` 端口，便于局域网访问。
+- 如果只希望本机访问，请把端口映射改为 `127.0.0.1:8080:8080`。
 - 如果要通过公网访问，建议放到反向代理后面，并启用 HTTPS。
 - 不建议设置 `WEB_UI_ALLOW_NO_AUTH=true`，除非你明确知道风险。
 

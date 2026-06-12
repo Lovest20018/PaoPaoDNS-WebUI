@@ -8,12 +8,27 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - CNAUTO=${CNAUTO:-yes}
+      - DNSPORT=${DNSPORT:-53}
+      - DNS_SERVERNAME=${DNS_SERVERNAME:-PaoPaoDNS,blog.03k.org}
+      - UPDATE=${UPDATE:-weekly}
+      - SERVER_IP=${SERVER_IP:-}
+      - SOCKS5=${SOCKS5:-}
       - CNFALL=${CNFALL:-yes}
+      - EXPIRED_FLUSH=${EXPIRED_FLUSH:-yes}
       - IPV6=${IPV6:-no}
       - CN_TRACKER=${CN_TRACKER:-yes}
       - USE_MARK_DATA=${USE_MARK_DATA:-yes}
       - CUSTOM_FORWARD=${CUSTOM_FORWARD:-}
+      - CUSTOM_FORWARD_TTL=${CUSTOM_FORWARD_TTL:-0}
+      - AUTO_FORWARD=${AUTO_FORWARD:-no}
+      - AUTO_FORWARD_CHECK=${AUTO_FORWARD_CHECK:-yes}
       - RULES_TTL=${RULES_TTL:-0}
+      - USE_HOSTS=${USE_HOSTS:-no}
+      - HTTP_FILE=${HTTP_FILE:-no}
+      - SHUFFLE=${SHUFFLE:-no}
+      - ADDINFO=${ADDINFO:-no}
+      - SAFEMODE=${SAFEMODE:-no}
+      - QUERY_TIME=${QUERY_TIME:-2000ms}
     ports:
       - "53:53/udp"
       - "53:53/tcp"
@@ -27,17 +42,36 @@ services:
     environment:
       - DATA_DIR=/data
       - WEB_UI_TOKEN=${WEB_UI_TOKEN:?set WEB_UI_TOKEN, e.g. openssl rand -hex 32}
+      - DNS_TEST_SERVER=${DNS_TEST_SERVER:-paopaodns}
+      - DNS_TEST_PORT=${DNS_TEST_PORT:-53}
+      - DNS_TEST_TIMEOUT=${DNS_TEST_TIMEOUT:-3}
       # Set WEB_UI_ALLOW_NO_AUTH=true to allow access without token (not recommended)
       # Mirror PaoPaoDNS runtime env so the Web UI can report reload conditions accurately.
+      - TZ=Asia/Shanghai
       - CNAUTO=${CNAUTO:-yes}
+      - DNSPORT=${DNSPORT:-53}
+      - DNS_SERVERNAME=${DNS_SERVERNAME:-PaoPaoDNS,blog.03k.org}
+      - UPDATE=${UPDATE:-weekly}
+      - SERVER_IP=${SERVER_IP:-}
+      - SOCKS5=${SOCKS5:-}
       - CNFALL=${CNFALL:-yes}
+      - EXPIRED_FLUSH=${EXPIRED_FLUSH:-yes}
       - IPV6=${IPV6:-no}
       - CN_TRACKER=${CN_TRACKER:-yes}
       - USE_MARK_DATA=${USE_MARK_DATA:-yes}
       - CUSTOM_FORWARD=${CUSTOM_FORWARD:-}
+      - CUSTOM_FORWARD_TTL=${CUSTOM_FORWARD_TTL:-0}
+      - AUTO_FORWARD=${AUTO_FORWARD:-no}
+      - AUTO_FORWARD_CHECK=${AUTO_FORWARD_CHECK:-yes}
       - RULES_TTL=${RULES_TTL:-0}
+      - USE_HOSTS=${USE_HOSTS:-no}
+      - HTTP_FILE=${HTTP_FILE:-no}
+      - SHUFFLE=${SHUFFLE:-no}
+      - ADDINFO=${ADDINFO:-no}
+      - SAFEMODE=${SAFEMODE:-no}
+      - QUERY_TIME=${QUERY_TIME:-2000ms}
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8080:8080"
     depends_on:
       - paopaodns
 

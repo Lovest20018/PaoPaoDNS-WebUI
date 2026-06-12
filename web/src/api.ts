@@ -44,6 +44,11 @@ export interface SystemStatus {
   data_readable: boolean;
   data_writable: boolean;
   auth_enabled: boolean;
+  dns_test?: {
+    server: string;
+    port: number;
+    timeout: number;
+  };
   env: Record<string, string>;
   files: Record<string, boolean>;
   files_info: Record<string, {

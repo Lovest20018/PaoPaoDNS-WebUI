@@ -36,10 +36,11 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function EnvConfigPage() {
-  const { envValues, customEnvEntries, setCustomEnvEntries } = useStore();
+  const { envValues, customEnvEntries, setCustomEnvEntries, setEnvValues } = useStore();
   const loadEnvRef = useRef<() => Promise<void>>(async () => {});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [runtimeEnvKeys, setRuntimeEnvKeys] = useState<string[]>([]);
   const customEnvByKey = new Map(customEnvEntries.filter((entry) => entry.key).map((entry) => [entry.key, entry]));
   const cnAutoEntry = customEnvByKey.get('CNAUTO');
   const cnAutoEnabled = (cnAutoEntry?.enabled ? cnAutoEntry.value : envValues.CNAUTO) === 'yes';
@@ -48,6 +49,10 @@ export default function EnvConfigPage() {
     setLoading(true);
     setError('');
     try {
+      const status = await api.getStatus();
+      setEnvValues(status.env);
+      setRuntimeEnvKeys(Object.keys(status.env));
+
       const result = await api.readFile('custom_env.ini');
       setCustomEnvEntries(parseCustomEnv(result.content || ''));
     } catch (e: unknown) {
@@ -78,7 +83,7 @@ export default function EnvConfigPage() {
       <div className="page-header">
         <h2>环境变量</h2>
         <p>
-          当前 custom_env.ini 中的运行时变量覆盖（只读）。修改环境变量请前往"高级配置"页面编辑 custom_env.ini。
+          当前生效运行参数（只读）。custom_env.ini 会覆盖 Web 容器中镜像的启动环境变量。
         </p>
       </div>
 
@@ -88,12 +93,12 @@ export default function EnvConfigPage() {
           说明
         </div>
         <div className="card-desc">
-          这里显示的是 <code style={{ color: 'var(--accent-cyan)' }}>custom_env.ini</code> 中已定义的运行时变量覆盖。
-          本页只按 custom_env.ini 判断“覆盖”；概览页的热重载状态会额外结合 Web 容器中镜像的启动环境变量。
+          这里显示的是 Web UI 后端能看到的生效变量：先读取 Web UI 容器里镜像的启动环境变量，再由
+          <code style={{ color: 'var(--accent-cyan)' }}> custom_env.ini</code> 中已启用的同名变量覆盖。
           <br /><br />
           如需修改变量覆盖，请前往"高级配置"页面编辑 custom_env.ini，修改后会自动热重载，无需重启。
           <br /><br />
-          如需修改 Docker 启动环境变量（如 CNAUTO、IPV6 等），需要重新创建容器，请使用"部署生成"页面。
+          Web UI 不能直接读取另一个 PaoPaoDNS 容器的启动环境变量；需要把对应变量同步到 paopaodns-web 的 environment，修改后重新创建 Web UI 容器。
         </div>
       </div>
 
@@ -117,10 +122,6 @@ export default function EnvConfigPage() {
         const vars = ENV_VARS.filter((v) => v.group === group);
         const hasCnOnly = vars.some((v) => v.requiresCNAUTO);
 
-        // Only show non-basic groups when custom_env.ini has related entries.
-        const overriddenVars = vars.filter((v) => customEnvByKey.has(v.key));
-        if (overriddenVars.length === 0 && group !== 'basic') return null;
-
         return (
           <div className="card" key={group}>
             <div className="card-title">
@@ -141,20 +142,30 @@ export default function EnvConfigPage() {
 
             <table className="info-table">
               <thead>
-                <tr><th>变量</th><th>当前覆盖值</th><th>默认值</th><th>说明</th></tr>
+                <tr><th>变量</th><th>当前生效值</th><th>来源</th><th>默认值</th><th>说明</th></tr>
               </thead>
               <tbody>
                 {vars.map((v) => {
                   const customEntry = customEnvByKey.get(v.key);
                   const hasDefinedOverride = !!customEntry;
                   const hasActiveOverride = !!customEntry?.enabled;
+                  const hasMirroredEnv = runtimeEnvKeys.includes(v.key);
+                  const effectiveValue = envValues[v.key] ?? v.defaultValue;
+                  const sourceLabel = hasActiveOverride
+                    ? 'custom_env.ini'
+                    : hasMirroredEnv ? 'Web 容器环境' : '默认值';
+                  const sourceBadge = hasActiveOverride
+                    ? 'badge-green'
+                    : hasMirroredEnv ? 'badge-blue' : 'badge-amber';
                   return (
                     <tr key={v.key} style={{ opacity: (v.requiresCNAUTO && !cnAutoEnabled) ? 0.4 : 1 }}>
                       <td><code style={{ color: 'var(--accent-cyan)' }}>{v.key}</code></td>
-                      <td style={{ color: hasActiveOverride ? 'var(--accent-green)' : 'var(--text-muted)', fontWeight: hasActiveOverride ? 600 : 400 }}>
-                        {hasDefinedOverride ? customEntry?.value ?? '' : '未覆盖'}
-                        {hasActiveOverride && <span className="badge badge-green" style={{ marginLeft: 6 }}>已覆盖</span>}
-                        {hasDefinedOverride && !hasActiveOverride && <span className="badge badge-amber" style={{ marginLeft: 6 }}>已禁用</span>}
+                      <td style={{ color: effectiveValue !== v.defaultValue ? 'var(--accent-green)' : 'var(--text-muted)', fontWeight: effectiveValue !== v.defaultValue ? 600 : 400 }}>
+                        {effectiveValue || <span style={{ color: 'var(--text-muted)' }}>(空)</span>}
+                      </td>
+                      <td>
+                        <span className={`badge ${sourceBadge}`}>{sourceLabel}</span>
+                        {hasDefinedOverride && !hasActiveOverride && <span className="badge badge-amber" style={{ marginLeft: 6 }}>custom_env 已禁用</span>}
                       </td>
                       <td style={{ color: 'var(--text-muted)' }}>{v.defaultValue}</td>
                       <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 300 }}>{v.description}</td>

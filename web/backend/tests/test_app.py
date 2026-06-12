@@ -44,6 +44,41 @@ def test_status_accepts_bearer_token(client):
     assert response.get_json()["auth_enabled"] is True
 
 
+def test_status_includes_dns_test_target(client, monkeypatch):
+    monkeypatch.setattr(backend, "DNS_TEST_SERVER", "dns.local")
+    monkeypatch.setattr(backend, "DNS_TEST_PORT", 5353)
+    monkeypatch.setattr(backend, "DNS_TEST_TIMEOUT", 1.5)
+
+    response = client.get("/api/status", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    assert response.get_json()["dns_test"] == {
+        "server": "dns.local",
+        "port": 5353,
+        "timeout": 1.5,
+    }
+
+
+def test_status_includes_mirrored_runtime_env(client, monkeypatch):
+    monkeypatch.setenv("DNSPORT", "5353")
+    monkeypatch.setenv("DNS_SERVERNAME", "Lovest_DNS")
+    monkeypatch.setenv("SERVER_IP", "192.168.8.88")
+    monkeypatch.setenv("IPV6", "yes_only6")
+    monkeypatch.setenv("CUSTOM_FORWARD", "192.168.8.99:53")
+    monkeypatch.setenv("ADDINFO", "no")
+
+    response = client.get("/api/status", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    env = response.get_json()["env"]
+    assert env["DNSPORT"] == "5353"
+    assert env["DNS_SERVERNAME"] == "Lovest_DNS"
+    assert env["SERVER_IP"] == "192.168.8.88"
+    assert env["IPV6"] == "yes_only6"
+    assert env["CUSTOM_FORWARD"] == "192.168.8.99:53"
+    assert env["ADDINFO"] == "no"
+
+
 def test_disallowed_file_is_rejected(client):
     response = put_file(client, "not_allowed.txt", "x")
 

@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { useStore } from '../store';
 import * as api from '../api';
 import { useToast } from '../hooks';
 import { ENV_VARS, GROUP_LABELS } from '../types';
@@ -81,7 +80,7 @@ const DEFAULT_COMPOSE_CONFIG: ComposeConfig = {
     containerName: 'paopaodns-web',
     image: 'ghcr.io/lovest20018/paopaodns-webui:latest',
     restart: 'always',
-    host: '127.0.0.1',
+    host: '',
     hostPort: '8080',
     dnsTestServer: '',
     token: '${WEB_UI_TOKEN:?set WEB_UI_TOKEN}',
@@ -89,10 +88,12 @@ const DEFAULT_COMPOSE_CONFIG: ComposeConfig = {
   },
 };
 
-const WEB_UI_MIRRORED_ENV_KEYS = ['TZ', 'CNAUTO', 'CNFALL', 'IPV6', 'CN_TRACKER', 'USE_MARK_DATA', 'CUSTOM_FORWARD', 'RULES_TTL'];
+const WEB_UI_MIRRORED_ENV_KEYS = ENV_VARS.map((envVar) => envVar.key);
 const DOCKER_RUN_SEPARATOR = ' \\' + '\n  ';
 const DEFAULT_BIND_DATA_PATH = '/home/mydata';
 const DEFAULT_VOLUME_NAME = 'paopaodns-data';
+const DEFAULT_YAML_ANCHOR = 'a1';
+const DATA_VOLUME_YAML_ANCHOR = 'paopao_data';
 
 function slugifyServiceName(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'paopaodns';
@@ -162,6 +163,13 @@ function buildWebUiEnvironment(config: ComposeConfig): Record<string, string> {
   }
 
   return environment;
+}
+
+function renameDataVolumeYamlAnchor(yaml: string): string {
+  // yaml names the first shared object a1; make the generated compose easier to read.
+  return yaml
+    .replace(new RegExp(`&${DEFAULT_YAML_ANCHOR}\\b`, 'g'), `&${DATA_VOLUME_YAML_ANCHOR}`)
+    .replace(new RegExp(`\\*${DEFAULT_YAML_ANCHOR}\\b`, 'g'), `*${DATA_VOLUME_YAML_ANCHOR}`);
 }
 
 function generateMainDockerRun(config: ComposeConfig): string {
@@ -317,11 +325,10 @@ function generateDockerCompose(config: ComposeConfig): string {
     doc.volumes = { [dataSource(config)]: {} };
   }
 
-  return YAML.stringify(doc);
+  return renameDataVolumeYamlAnchor(YAML.stringify(doc));
 }
 
 export default function DeployPage() {
-  const { envLoaded } = useStore();
   const { showToast, ToastComponent } = useToast();
   const envTouchedRef = useRef(false);
   const [activeTab, setActiveTab] = useState<OutputTab>('docker-compose');
@@ -334,21 +341,28 @@ export default function DeployPage() {
 
   const envLoadedOnInitRef = useRef(false);
 
-  // Sync env values once loaded from API
+  // Import the runtime env that the Web UI backend can see. This lets the
+  // generated compose mirror PaoPaoDNS values into the Web UI sidecar.
   useEffect(() => {
-    if (!envLoaded || envLoadedOnInitRef.current) return;
+    if (envLoadedOnInitRef.current) return;
     const timer = window.setTimeout(() => {
       envLoadedOnInitRef.current = true;
-      api.getEnv().then((env) => {
+      api.getStatus().then((status) => {
         if (!envTouchedRef.current) {
-          setConfig((prev) => ({ ...prev, envVars: { ...env } }));
+          setConfig((prev) => ({ ...prev, envVars: { ...status.env } }));
         }
       }).catch(() => {
-        showToast('读取环境变量失败，生成的配置将不包含环境变量，可点击"展开全部默认变量"手动添加');
+        api.getEnv().then((env) => {
+          if (!envTouchedRef.current) {
+            setConfig((prev) => ({ ...prev, envVars: { ...env } }));
+          }
+        }).catch(() => {
+          showToast('读取环境变量失败，生成的配置将不包含环境变量，可点击"展开全部默认变量"手动添加');
+        });
       });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [envLoaded, showToast]);
+  }, [showToast]);
 
   const dockerRunCmd = generateDockerRun(config);
   const dockerComposeContent = generateDockerCompose(config);
@@ -396,6 +410,23 @@ export default function DeployPage() {
       ...prev,
       envVars: { ...DEFAULT_ENV_VALUES },
     }));
+  };
+
+  const importRuntimeEnvVars = async () => {
+    envTouchedRef.current = true;
+    try {
+      const status = await api.getStatus();
+      setConfig((prev) => ({ ...prev, envVars: { ...status.env } }));
+      showToast('已导入 Web UI 当前可见的生效环境变量');
+    } catch {
+      try {
+        const env = await api.getEnv();
+        setConfig((prev) => ({ ...prev, envVars: { ...env } }));
+        showToast('已导入 custom_env.ini 中的环境变量覆盖');
+      } catch {
+        showToast('读取环境变量失败，可点击"展开全部默认变量"手动添加');
+      }
+    }
   };
 
   const updateEnvVar = (key: string, value: string) => {
@@ -466,8 +497,8 @@ export default function DeployPage() {
         <div className="card-desc">
           此页面用于生成 <strong>新的部署配置</strong>，不会修改原 PaoPaoDNS 项目的任何文件。<br />
           可生成 PaoPaoDNS + Web UI 的完整部署，也可以只生成 Web UI sidecar 接入已有 PaoPaoDNS。<br />
-          下方环境变量默认只输出 data/custom_env.ini 中的覆盖值，避免把当前前端维护的默认值固化到新容器。需要完整显式环境变量时可点击“展开全部默认变量”。<br />
-          Web UI 无法直接读取当前容器启动时的 Docker 环境变量；这里编辑的是用于新建容器/重新部署导出的配置。
+          下方环境变量会自动导入 Web UI 后端当前可见的生效变量，并在生成时同步给 Web UI sidecar；需要完整显式环境变量时可点击“展开全部默认变量”。<br />
+          Web UI 不能直接读取另一个 PaoPaoDNS 容器的启动环境变量；推荐先把 PaoPaoDNS 变量同步到 paopaodns-web 的 environment，再用这里导出新的 compose。
         </div>
       </div>
 
@@ -651,7 +682,7 @@ export default function DeployPage() {
           <div className="form-panel">
             <div className="card-title">Web UI sidecar</div>
             <div className="card-desc">
-              Web UI 只读写共享 /data，不挂载 Docker socket。建议默认绑定到 127.0.0.1，并通过反向代理提供公网访问。
+              Web UI 只读写共享 /data，不挂载 Docker socket。监听地址留空会绑定所有地址，便于局域网访问；公网建议配合反向代理和 HTTPS。
             </div>
             {config.deploymentMode === 'full' && (
               <label className="checkbox-row">
@@ -769,9 +800,12 @@ export default function DeployPage() {
           <div className="form-panel">
             <div className="card-title">环境变量</div>
             <div className="card-desc">
-              这里列出 PaoPaoDNS 常用启动环境变量。未添加的变量生成时不会传递，容器会使用镜像自身默认值；已添加的变量会写入 docker-compose 或 docker run。
+              这里列出 PaoPaoDNS 常用启动环境变量。已添加的变量会同时写入 PaoPaoDNS 主容器，并镜像给 Web UI sidecar 用于显示当前生效配置和判断热重载条件。
             </div>
             <div className="inline-actions">
+              <button className="btn btn-secondary btn-sm" onClick={importRuntimeEnvVars}>
+                导入当前生效变量
+              </button>
               <button className="btn btn-secondary btn-sm" onClick={restoreDefaultEnvVars}>
                 展开全部默认变量
               </button>
