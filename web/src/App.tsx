@@ -23,6 +23,19 @@ const NAV_ITEMS: { key: Page; label: string; icon: LucideIcon }[] = [
   { key: 'advanced', label: '高级配置', icon: SlidersHorizontal },
 ];
 
+const PAGE_PATHS: Record<Page, string> = {
+  overview: '/',
+  env: '/env',
+  lists: '/lists',
+  deploy: '/deploy',
+  ttl: '/ttl',
+  advanced: '/advanced',
+};
+
+const PATH_PAGES = new Map<string, Page>(
+  Object.entries(PAGE_PATHS).map(([page, path]) => [path, page as Page]),
+);
+
 const PAGE_COMPONENTS: Record<Page, React.FC> = {
   overview: OverviewPage,
   env: EnvConfigPage,
@@ -35,8 +48,13 @@ const PAGE_COMPONENTS: Record<Page, React.FC> = {
 const WEB_UI_REPO_URL = 'https://github.com/Lovest20018/PaoPaoDNS-WebUI';
 const UPSTREAM_REPO_URL = 'https://github.com/kkkgo/PaoPaoDNS';
 
+function pageFromHash(): Page {
+  const hashPath = window.location.hash.replace(/^#/, '') || '/';
+  return PATH_PAGES.get(hashPath) ?? 'overview';
+}
+
 function App() {
-  const [activePage, setActivePage] = useState<Page>('overview');
+  const [activePage, setActivePage] = useState<Page>(() => pageFromHash());
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     const savedTheme = localStorage.getItem('paopaodns-theme');
     if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme;
@@ -49,6 +67,16 @@ function App() {
     document.documentElement.dataset.theme = themeMode;
     localStorage.setItem('paopaodns-theme', themeMode);
   }, [themeMode]);
+
+  useEffect(() => {
+    const syncRoute = () => setActivePage(pageFromHash());
+    window.addEventListener('hashchange', syncRoute);
+    if (!window.location.hash) {
+      window.history.replaceState(null, '', '#/');
+    }
+    syncRoute();
+    return () => window.removeEventListener('hashchange', syncRoute);
+  }, []);
 
   const toggleTheme = () => {
     setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'));
@@ -70,15 +98,14 @@ function App() {
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             return (
-              <button
+              <a
                 key={item.key}
-                type="button"
+                href={`#${PAGE_PATHS[item.key]}`}
                 className={`nav-item ${activePage === item.key ? 'active' : ''}`}
-                onClick={() => setActivePage(item.key)}
               >
                 <Icon />
                 <span>{item.label}</span>
-              </button>
+              </a>
             );
           })}
         </nav>

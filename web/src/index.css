@@ -1357,16 +1357,107 @@ body {
   white-space: nowrap;
 }
 
+.dns-diagnostic-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.95fr) minmax(320px, 1.05fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.dns-control-panel .form-group {
+  margin-bottom: 12px;
+}
+
+.dns-result-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dns-result-block,
+.dns-health-block {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.dns-result-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.dns-result-error {
+  margin-bottom: 10px;
+  color: var(--accent-red);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.dns-answer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dns-answer-row {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: rgba(8, 14, 27, 0.36);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.dns-answer-row span {
+  font-weight: 850;
+  color: var(--accent-cyan);
+}
+
+.dns-answer-row code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dns-answer-row small {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 @media (max-width: 980px) {
   .overview-top-grid,
   .overview-token-card,
-  .overview-metric-grid {
+  .overview-metric-grid,
+  .dns-diagnostic-grid {
     grid-template-columns: 1fr;
   }
 
   .overview-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 720px) {
+  .dns-answer-row {
+    grid-template-columns: 1fr;
+    align-items: start;
   }
 }
 

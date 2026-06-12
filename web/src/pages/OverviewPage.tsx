@@ -4,7 +4,7 @@ import * as api from '../api';
 import {
   Activity, Shield, Globe, Database,
   RefreshCw, CheckCircle, XCircle, AlertTriangle,
-  FileText, HardDrive, Key, Eye, EyeOff
+  FileText, HardDrive, Key, Eye, EyeOff, Search, Play, Server
 } from 'lucide-react';
 
 export default function OverviewPage() {
@@ -20,6 +20,15 @@ export default function OverviewPage() {
   const [filesInfo, setFilesInfo] = useState<Record<string, { watched_now: boolean; condition: string }>>({});
   const [tokenInput, setTokenInput] = useState(api.getStoredToken());
   const [tokenVisible, setTokenVisible] = useState(false);
+  const [dnsDomain, setDnsDomain] = useState('www.baidu.com');
+  const [dnsRecordType, setDnsRecordType] = useState<'A' | 'AAAA' | 'CNAME'>('A');
+  const [dnsServer, setDnsServer] = useState('paopaodns');
+  const [dnsPort, setDnsPort] = useState('53');
+  const [dnsResult, setDnsResult] = useState<api.DnsTestResult | null>(null);
+  const [healthResult, setHealthResult] = useState<api.HealthCheckResult | null>(null);
+  const [dnsLoading, setDnsLoading] = useState(false);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [dnsError, setDnsError] = useState('');
   const loadStatusRef = useRef<() => Promise<void>>(async () => {});
 
   const cnAutoEnabled = envValues.CNAUTO === 'yes';
@@ -63,6 +72,45 @@ export default function OverviewPage() {
   const handleTokenSave = () => {
     api.setToken(tokenInput);
     loadStatus();
+  };
+
+  const parsedDnsPort = () => {
+    const value = Number.parseInt(dnsPort, 10);
+    return Number.isFinite(value) ? value : 53;
+  };
+
+  const handleDnsLookup = async () => {
+    setDnsLoading(true);
+    setDnsError('');
+    try {
+      const result = await api.runDnsTest({
+        domain: dnsDomain,
+        record_type: dnsRecordType,
+        server: dnsServer || undefined,
+        port: parsedDnsPort(),
+      });
+      setDnsResult(result);
+    } catch (e: unknown) {
+      setDnsError(e instanceof Error ? e.message : 'DNS 查询失败');
+    } finally {
+      setDnsLoading(false);
+    }
+  };
+
+  const handleHealthCheck = async () => {
+    setHealthLoading(true);
+    setDnsError('');
+    try {
+      const result = await api.runHealthCheck({
+        server: dnsServer || undefined,
+        port: parsedDnsPort(),
+      });
+      setHealthResult(result);
+    } catch (e: unknown) {
+      setDnsError(e instanceof Error ? e.message : '健康检查失败');
+    } finally {
+      setHealthLoading(false);
+    }
   };
 
   if (loading) {
@@ -239,6 +287,126 @@ export default function OverviewPage() {
           <strong style={{ color: envValues.USE_MARK_DATA === 'yes' ? 'var(--accent-purple)' : 'var(--text-muted)' }}>
             {envValues.USE_MARK_DATA === 'yes' ? '开启' : '关闭'}
           </strong>
+        </div>
+      </div>
+
+      {/* DNS Diagnostics */}
+      <div className="card">
+        <div className="card-title"><Search size={18} /> DNS 诊断</div>
+        <div className="card-desc">对目标 DNS 服务执行 A / AAAA / CNAME 查询和 CN/非 CN 健康检查</div>
+        <div className="dns-diagnostic-grid">
+          <div className="dns-control-panel">
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">域名</label>
+                <input
+                  className="form-input"
+                  value={dnsDomain}
+                  onChange={(e) => setDnsDomain(e.target.value)}
+                  placeholder="www.baidu.com"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">记录类型</label>
+                <select
+                  className="form-select"
+                  value={dnsRecordType}
+                  onChange={(e) => setDnsRecordType(e.target.value as 'A' | 'AAAA' | 'CNAME')}
+                >
+                  <option value="A">A</option>
+                  <option value="AAAA">AAAA</option>
+                  <option value="CNAME">CNAME</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">DNS 服务</label>
+                <input
+                  className="form-input"
+                  value={dnsServer}
+                  onChange={(e) => setDnsServer(e.target.value)}
+                  placeholder="paopaodns"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">端口</label>
+                <input
+                  className="form-input"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={dnsPort}
+                  onChange={(e) => setDnsPort(e.target.value)}
+                  placeholder="53"
+                />
+              </div>
+            </div>
+            <div className="inline-actions">
+              <button className="btn btn-primary btn-sm" onClick={handleDnsLookup} disabled={dnsLoading}>
+                {dnsLoading ? <RefreshCw size={14} /> : <Search size={14} />} 查询
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={handleHealthCheck} disabled={healthLoading}>
+                {healthLoading ? <RefreshCw size={14} /> : <Play size={14} />} 健康检查
+              </button>
+              <span className="summary-chip"><Server size={13} /> {dnsServer || 'paopaodns'}:{dnsPort || '53'}</span>
+            </div>
+            {dnsError && (
+              <div className="overview-inline-warning">
+                {dnsError}
+              </div>
+            )}
+          </div>
+
+          <div className="dns-result-panel">
+            {dnsResult ? (
+              <div className="dns-result-block">
+                <div className="dns-result-header">
+                  <span className={`badge ${dnsResult.available ? 'badge-green' : 'badge-red'}`}>
+                    {dnsResult.rcode || (dnsResult.available ? 'OK' : '失败')}
+                  </span>
+                  <span>{dnsResult.domain}</span>
+                  {dnsResult.elapsed_ms !== undefined && <span>{dnsResult.elapsed_ms} ms</span>}
+                </div>
+                {dnsResult.error && <div className="dns-result-error">{dnsResult.error}</div>}
+                <div className="dns-answer-list">
+                  {dnsResult.answers.length > 0 ? dnsResult.answers.map((answer, index) => (
+                    <div className="dns-answer-row" key={`${answer.name}-${answer.type}-${answer.value}-${index}`}>
+                      <span>{answer.type}</span>
+                      <code>{answer.value}</code>
+                      <small>TTL {answer.ttl}</small>
+                    </div>
+                  )) : (
+                    <div className="floating-note">无应答记录</div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="floating-note">尚未执行 DNS 查询</div>
+            )}
+
+            {healthResult && (
+              <div className="dns-health-block">
+                <div className="dns-result-header">
+                  <span className={`badge ${healthResult.pass ? 'badge-green' : 'badge-red'}`}>
+                    {healthResult.pass ? '健康' : '异常'}
+                  </span>
+                  <span>{healthResult.server}:{healthResult.port}</span>
+                </div>
+                <div className="dns-answer-list">
+                  {Object.entries(healthResult.tests).map(([key, item]) => (
+                    <div className="dns-answer-row" key={key}>
+                      <span>{key === 'cn' ? 'CN' : '非 CN'}</span>
+                      <code>{item.domain}</code>
+                      <small style={{ color: item.resolved ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                        {item.resolved ? '已解析' : '失败'}
+                      </small>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

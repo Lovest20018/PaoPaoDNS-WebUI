@@ -76,6 +76,39 @@ export interface SaveResult {
   condition: string;
 }
 
+export interface DnsAnswer {
+  name: string;
+  type: string;
+  ttl: number;
+  value: string;
+  class?: number;
+}
+
+export interface DnsTestResult {
+  available: boolean;
+  domain: string;
+  record_type: 'A' | 'AAAA' | 'CNAME';
+  server: string;
+  port: number;
+  elapsed_ms?: number;
+  rcode?: string;
+  answers: DnsAnswer[];
+  results: string[];
+  error?: string;
+}
+
+export interface HealthCheckResult {
+  pass: boolean;
+  server: string;
+  port: number;
+  error?: string;
+  tests: Record<string, {
+    domain: string;
+    resolved: boolean;
+    result?: DnsTestResult;
+  }>;
+}
+
 export async function getStatus(): Promise<SystemStatus> {
   return apiFetch<SystemStatus>('/api/status');
 }
@@ -93,6 +126,26 @@ export async function writeFile(filename: string, content: string): Promise<Save
     method: 'PUT',
     body: JSON.stringify({ content }),
   });
+}
+
+export async function runDnsTest(params: {
+  domain: string;
+  record_type: 'A' | 'AAAA' | 'CNAME';
+  server?: string;
+  port?: number;
+}): Promise<DnsTestResult> {
+  return apiFetch<DnsTestResult>('/api/dns-test', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function runHealthCheck(params?: { server?: string; port?: number }): Promise<HealthCheckResult> {
+  const query = new URLSearchParams();
+  if (params?.server) query.set('server', params.server);
+  if (params?.port) query.set('port', String(params.port));
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiFetch<HealthCheckResult>(`/api/health-check${suffix}`);
 }
 
 export function setToken(token: string): void {
