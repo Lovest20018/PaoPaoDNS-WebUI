@@ -10,6 +10,7 @@
 
 - 查看 `/data` 目录状态、认证状态、配置文件是否存在
 - 查看文件保存后是否会自动热重载，以及未生效原因
+- DNS 诊断：对目标 DNS 服务执行 A / AAAA / CNAME 查询和 CN/非 CN 健康检查
 - 编辑 `custom_env.ini`，支持启用/禁用变量
 - 编辑域名列表：
   - `force_forward_list.txt`
@@ -19,14 +20,15 @@
   - `trackerslist.txt`（Tracker URL 列表，仅文本编辑）
 - 编辑 `force_ttl_rules.txt`，支持 `@`、`@@`、`@@@` 规则
 - 编辑 `custom_mod.yaml`、`unbound_custom.conf`
-- 生成 docker compose / docker run 部署配置
+- 生成 docker compose / docker run 部署配置，支持完整部署和仅 Web UI sidecar 两种模式
+- 后端保存前校验文件内容和大小，写入时保留 `.bak` 备份并在失败时回滚
 - 支持亮色/暗色主题
 
 ## 界面预览
 
 ### 概览
 
-查看 `/data` 目录读写状态、Token 鉴权状态、关键配置文件是否存在，以及各文件保存后的热重载条件。
+查看 `/data` 目录读写状态、Token 鉴权状态、关键配置文件是否存在、各文件保存后的热重载条件，以及 DNS 查询诊断结果。
 
 ![概览](docs/screenshots/overview.png)
 
@@ -38,7 +40,7 @@
 
 ### 部署生成
 
-可视化生成 `docker-compose.yaml` 或 `docker run` 命令，用于新建 PaoPaoDNS 容器或重新部署；此页面只导出配置，不写入 `/data`。
+可视化生成 `docker-compose.yaml` 或 `docker run` 命令，可选择同时部署 PaoPaoDNS + Web UI，或只生成接入已有 `/data` 的 Web UI sidecar；此页面只导出配置，不写入 `/data`。
 
 ![部署生成](docs/screenshots/deploy.png)
 
@@ -59,14 +61,16 @@
 1. 部署 PaoPaoDNS 与 Web UI，并确认两个容器共享同一个 `/data` volume 或 bind mount。
 2. 访问 `http://127.0.0.1:8080`，输入 `WEB_UI_TOKEN` 完成鉴权。
 3. 在「概览」确认 `/data` 可读写、文件存在状态和热重载条件。
-4. 在「域名列表」「TTL 规则」「高级配置」中编辑对应文件并保存。
-5. 根据保存后的提示判断配置是否已自动热重载；如果提示需要 reload 或重启，请在宿主机执行对应操作。
-6. 如需重新部署，可在「部署生成」中导出 `docker-compose.yaml` 或 `docker run` 命令。
+4. 如需排查 DNS 可用性，可在「概览」的 DNS 诊断中测试 `A` / `AAAA` / `CNAME` 查询和 CN/非 CN 健康检查。
+5. 在「域名列表」「TTL 规则」「高级配置」中编辑对应文件并保存。
+6. 根据保存后的提示判断配置是否已自动热重载；如果提示需要 reload 或重启，请在宿主机执行对应操作。
+7. 如需重新部署，可在「部署生成」中导出 `docker-compose.yaml` 或 `docker run` 命令。
 
 ## 设计原则
 
 - **不需要 Docker socket**：Web UI 不能控制宿主机 Docker，也不能随意操作容器。
 - **只读写白名单文件**：后端只允许访问 PaoPaoDNS 常用配置文件。
+- **保存前后端校验**：写入前会校验文件格式、大小和危险控制字符，避免明显错误配置落盘。
 - **共享 `/data` 即可工作**：Web UI 和 PaoPaoDNS 通过同一个 volume 或 bind mount 配合。
 - **保存后给出生效提示**：自动热重载、需要 `reload.sh`、需要重启容器都会在页面提示。
 
@@ -104,6 +108,8 @@ http://127.0.0.1:8080
 
 两个容器共享同一个 `paopaodns-data` volume。
 
+DNS 诊断默认从 Web UI 容器访问 `paopaodns:53`。使用本仓库的 `docker-compose-web.yaml` 时，两个服务在同一个 Compose 网络中，通常不需要额外配置。
+
 ### 方式二：给已有 PaoPaoDNS 添加 Web UI
 
 如果你已经有一个运行中的 PaoPaoDNS 容器，只需要让 Web UI 挂载同一个 `/data`。
@@ -126,6 +132,11 @@ WEB_UI_TOKEN=$(openssl rand -hex 32)
 
 # Web UI 镜像；默认使用 GHCR 预构建镜像，不需要本地 build
 PAOPAODNS_WEB_IMAGE=ghcr.io/lovest20018/paopaodns-webui:latest
+
+# DNS 诊断目标；Web UI 容器必须能访问该地址和端口
+DNS_TEST_SERVER=paopaodns
+DNS_TEST_PORT=53
+DNS_TEST_TIMEOUT=3
 
 # 建议按 paopaodns-old-env.txt 中的实际值填写，仅用于 Web UI 判断热重载条件
 TZ=Asia/Shanghai
@@ -158,6 +169,8 @@ docker build -t paopaodns-web ./web
 export PAOPAODNS_WEB_IMAGE=paopaodns-web
 ```
 
+如果要在已有 PaoPaoDNS 容器上使用 DNS 诊断，请确保 Web UI 容器能访问 PaoPaoDNS 的 DNS 端口。常见做法是让两个容器加入同一个用户自定义 Docker network，然后把 `DNS_TEST_SERVER` 设置为 PaoPaoDNS 的容器名、服务名或容器内可访问的 IP。即使 DNS 诊断暂时不可用，配置文件编辑仍然可以正常工作。
+
 #### 2A. 如果 PaoPaoDNS 使用宿主机目录
 
 假设你的 PaoPaoDNS 数据目录是 `/opt/paopaodns/data`：
@@ -169,6 +182,9 @@ docker run -d \
   -v /opt/paopaodns/data:/data \
   -e DATA_DIR=/data \
   -e WEB_UI_TOKEN="$WEB_UI_TOKEN" \
+  -e DNS_TEST_SERVER="${DNS_TEST_SERVER:-paopaodns}" \
+  -e DNS_TEST_PORT="${DNS_TEST_PORT:-53}" \
+  -e DNS_TEST_TIMEOUT="${DNS_TEST_TIMEOUT:-3}" \
   -e TZ="${TZ:-Asia/Shanghai}" \
   -e CNAUTO="${CNAUTO:-yes}" \
   -e CNFALL="${CNFALL:-yes}" \
@@ -198,6 +214,9 @@ docker run -d \
   -v paopaodns-data:/data \
   -e DATA_DIR=/data \
   -e WEB_UI_TOKEN="$WEB_UI_TOKEN" \
+  -e DNS_TEST_SERVER="${DNS_TEST_SERVER:-paopaodns}" \
+  -e DNS_TEST_PORT="${DNS_TEST_PORT:-53}" \
+  -e DNS_TEST_TIMEOUT="${DNS_TEST_TIMEOUT:-3}" \
   -e TZ="${TZ:-Asia/Shanghai}" \
   -e CNAUTO="${CNAUTO:-yes}" \
   -e CNFALL="${CNFALL:-yes}" \
@@ -238,7 +257,25 @@ Web UI 不挂 Docker socket，所以它不能直接读取另一个容器的启�
 
 ### 概览
 
-查看 `/data` 是否可读写、文件是否存在、各配置文件当前是否满足自动热重载条件。
+查看 `/data` 是否可读写、文件是否存在、各配置文件当前是否满足自动热重载条件，并提供 DNS 查询与健康检查入口。
+
+### DNS 诊断
+
+DNS 诊断从 Web UI 容器向配置的 DNS 服务发起 UDP 查询，支持：
+
+- 自定义域名和记录类型：`A` / `AAAA` / `CNAME`
+- 自定义 DNS 服务地址和端口
+- 一键 CN/非 CN 健康检查
+
+默认目标由环境变量控制：
+
+```yaml
+DNS_TEST_SERVER=paopaodns
+DNS_TEST_PORT=53
+DNS_TEST_TIMEOUT=3
+```
+
+此功能不执行 shell 命令，也不会读取 PaoPaoDNS 容器内部进程、Redis 或 Unbound 状态；它只用于验证 Web UI 容器到 DNS 服务的网络可达性和解析结果。
 
 ### 环境变量
 
@@ -255,6 +292,15 @@ Web UI 不挂 Docker socket，所以它不能直接读取另一个容器的启�
 
 `trackerslist.txt` 是 Tracker URL 列表，不是域名规则文件，因此页面只提供文本编辑，避免误改格式。
 
+### 部署生成
+
+支持两种模式：
+
+- **完整部署**：同时生成 PaoPaoDNS 主容器和 Web UI sidecar 配置。
+- **仅 Web UI sidecar**：接入已经存在的 PaoPaoDNS `/data` 目录或 named volume。
+
+部署生成器可以输出 `docker compose` 或 `docker run`，支持选择 bind mount / named volume、Web UI Token、Web UI 端口、DNS 诊断目标、资源限制和常用 PaoPaoDNS 环境变量。生成结果只用于复制导出，不会自动执行，也不会写入 `/data`。
+
 ### TTL 规则
 
 支持 PaoPaoDNS 的 TTL 规则语法：
@@ -264,17 +310,22 @@ example.com@1.2.3.4:53
 example.com@@1.2.3.4
 example.com@@@1.2.3.4
 example.com@@target.example.net
+example.com@@@target.example.net
 ```
 
-- `@`：转发到指定 DNS 服务器
+- `@`：子域名匹配，转发到指定 DNS 服务器，支持 `server:port` 或多个服务器
 - `@@`：子域名匹配，直接指定 A/AAAA/CNAME
 - `@@@`：精确匹配，直接指定 A/AAAA/CNAME
+
+如果文件中包含可视化编辑无法无损保留的注释或特殊语法，页面会提示并保留文本编辑模式，避免保存时重写原文件。
 
 ### 高级配置
 
 - `custom_env.ini`：保存后通常自动热重载
 - `custom_mod.yaml`：保存后需要在宿主机执行 `docker exec paopaodns reload.sh` 或重启容器
 - `unbound_custom.conf`：保存后需要重启 PaoPaoDNS 容器
+
+保存时后端会对 `custom_env.ini`、`custom_mod.yaml`、域名列表、TTL 规则和 Tracker URL 做基础格式校验；校验失败时不会写入文件。
 
 ## 安全建议
 
@@ -303,6 +354,33 @@ example.com@@target.example.net
 
 页面保存后会显示当前文件的生效提示。
 
+### DNS 诊断失败怎么办？
+
+DNS 诊断失败通常表示 Web UI 容器无法访问配置的 DNS 服务，而不一定表示 `/data` 文件编辑有问题。请重点检查：
+
+- PaoPaoDNS 容器是否正在运行并监听 DNS 端口。
+- Web UI 容器和 PaoPaoDNS 容器是否在同一个可互通的 Docker network。
+- `DNS_TEST_SERVER` 是否是 Web UI 容器内可解析或可访问的地址。
+- `DNS_TEST_PORT` 是否与 PaoPaoDNS 的 DNS 端口一致，默认是 `53`。
+
+使用本仓库的完整部署 compose 时，默认目标是 `paopaodns:53`。
+
+### 保存失败提示格式错误怎么办？
+
+新版本会在后端保存前校验内容。常见原因包括：
+
+- `custom_env.ini` 不是 `KEY="VALUE"` 格式。
+- `custom_mod.yaml` 不是合法 YAML，或顶层不是对象。
+- 域名列表包含空白字符或不支持的特殊字符。
+- `force_ttl_rules.txt` 规则没有使用 `@`、`@@` 或 `@@@`。
+- `trackerslist.txt` 不是有效 Tracker URL。
+
+请按页面报错行号修正后再保存。写入时会保留 `.bak` 备份，并在写入失败时尽量回滚到旧内容。
+
+### 部署生成会直接修改我的容器吗？
+
+不会。部署生成页面只生成 `docker compose` 或 `docker run` 文本，不会执行命令，也不会修改 `/data`。
+
 ### Web UI 会不会控制我的 PaoPaoDNS 容器？
 
 不会。Web UI 不挂载 Docker socket，也不安装 Docker CLI。它只读写共享 `/data` 中的配置文件。
@@ -329,6 +407,8 @@ npm install
 npm run dev
 ```
 
+前端开发服务器已配置 `/api` 代理到 `http://127.0.0.1:8080`，因此可以同时启动后端开发服务进行联调。
+
 构建：
 
 ```bash
@@ -341,6 +421,12 @@ npm --prefix web run build
 cd web/backend
 pip install -r requirements.txt
 DATA_DIR=/path/to/paopaodns/data WEB_UI_ALLOW_NO_AUTH=true python app.py
+```
+
+后端测试：
+
+```bash
+python -m pytest web/backend/tests
 ```
 
 ## 与 PaoPaoDNS 的关系

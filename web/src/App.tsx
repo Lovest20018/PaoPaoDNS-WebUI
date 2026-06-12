@@ -102,8 +102,9 @@ function App() {
                 key={item.key}
                 href={`#${PAGE_PATHS[item.key]}`}
                 className={`nav-item ${activePage === item.key ? 'active' : ''}`}
+                aria-current={activePage === item.key ? 'page' : undefined}
               >
-                <Icon />
+                <Icon aria-hidden="true" />
                 <span>{item.label}</span>
               </a>
             );
@@ -133,18 +134,31 @@ function App() {
       </aside>
 
       <main className="main-content">
+        <header className="mobile-header">
+          <div className="mobile-header-title">
+            <div className="brand-mark">P</div>
+            <h1>PaoPaoDNS</h1>
+          </div>
+        </header>
+
         <div className="main-toolbar">
           <div>
             <span className="eyebrow">Control Center</span>
             <h1>{activeNavItem?.label}</h1>
           </div>
           <div className="toolbar-actions">
-            <button className="theme-toggle" type="button" onClick={toggleTheme} title={themeMode === 'dark' ? '切换到日间模式' : '切换到夜间模式'}>
+            <button
+              className="theme-toggle"
+              type="button"
+              onClick={toggleTheme}
+              title={themeMode === 'dark' ? '切换到日间模式' : '切换到夜间模式'}
+              aria-label={themeMode === 'dark' ? '切换到日间模式' : '切换到夜间模式'}
+            >
               {themeMode === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
               <span>{themeMode === 'dark' ? '日间' : '夜间'}</span>
             </button>
-            <div className="status-pill">
-              <span className="status-dot" />
+            <div className="status-pill" aria-label="本地配置模式">
+              <span className="status-dot" aria-hidden="true" />
               本地配置模式
             </div>
           </div>
