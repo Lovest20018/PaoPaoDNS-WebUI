@@ -63,12 +63,13 @@ export interface SystemStatus {
 
 export interface FileContent {
   filename: string;
-  content: string;
+  content?: string;  // Optional: not present when file doesn't exist (404)
   auto_reload: boolean;
   requires_reload: boolean;
   requires_restart: boolean;
   watched_now: boolean;
   condition: string;
+  error?: string;  // Present on errors (403, 404, 500)
 }
 
 export interface SaveResult {

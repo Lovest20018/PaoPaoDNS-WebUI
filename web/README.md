@@ -1,28 +1,32 @@
 # PaoPaoDNS Web UI
 
-PaoPaoDNS 的 Web 配置管理面板，以 sidecar 容器方式与 PaoPaoDNS 共享 `/data` 卷运行。本仓库独立于 [PaoPaoDNS](https://github.com/kkkgo/PaoPaoDNS) 原项目，不修改其任何文件。
+PaoPaoDNS 的非官方 Web 配置管理面板，以 sidecar 容器方式与 PaoPaoDNS 共享 `/data` 卷运行。本仓库独立于 [PaoPaoDNS](https://github.com/kkkgo/PaoPaoDNS) 原项目，不修改其任何文件，也不挂载 Docker socket。
 
 ## 功能
 
-### 运行时配置管理（读写 /data，保存后自动热重载）
+### 运行时配置管理（读写 /data，保存后提示生效方式）
 
-- **概览** — /data 目录状态、鉴权状态、DNS 架构图、文件热重载情况
-- **环境变量** — 查看 custom_env.ini 中的运行时覆盖值
+- **概览** — /data 目录状态、鉴权状态、关键运行配置、DNS 架构图、DNS 诊断和文件热重载情况
+- **环境变量** — 查看当前生效运行参数，按 `custom_env.ini`、Web 容器环境或默认值标记来源
 - **域名列表** — 编辑 force_forward_list.txt / force_dnscrypt_list.txt / force_recurse_list.txt / custom_cn_mark.txt / trackerslist.txt（Tracker 列表仅文本编辑）
-- **TTL 规则** — 编辑 force_ttl_rules.txt
-- **高级配置** — 编辑 custom_env.ini / custom_mod.yaml / unbound_custom.conf
+- **TTL 规则** — 编辑 force_ttl_rules.txt，支持 `@` / `@@` / `@@@` 规则
+- **高级配置** — 编辑 custom_env.ini / custom_mod.yaml / unbound_custom.conf；复杂原文自动保持文本编辑，避免可视化保存重写注释或特殊语法
 
 ### 部署配置生成器（仅导出，不写入 /data）
 
-- **部署配置** — 可视化编辑 Docker Compose / docker run 参数，导出为文件
+- **部署配置** — 可视化编辑 Docker Compose / docker run 参数，支持完整部署和仅 Web UI sidecar，两种输出都只导出不执行
 
 ## 界面预览
 
 ### 概览
 
-查看 `/data` 目录读写状态、Token 鉴权状态、关键配置文件是否存在，以及各文件保存后的热重载条件。
+查看 `/data` 目录读写状态、Token 鉴权状态、关键配置文件是否存在、各文件保存后的热重载条件，以及 DNS 查询诊断结果。
 
 ![概览](../docs/screenshots/overview.png)
+
+### 环境变量
+
+只读展示 Web UI 后端当前可见的运行参数，并按来源标记为 `custom_env.ini`、Web 容器环境或默认值。`custom_env.ini` 中被注释的同名变量会显示为“custom_env 已禁用”，便于区分“定义过但未启用”和“当前真正生效”的值。
 
 ### 域名列表
 
@@ -32,7 +36,7 @@ PaoPaoDNS 的 Web 配置管理面板，以 sidecar 容器方式与 PaoPaoDNS 共
 
 ### 部署生成
 
-可视化生成 `docker-compose.yaml` 或 `docker run` 命令，用于新建 PaoPaoDNS 容器或重新部署；此页面只导出配置，不写入 `/data`。
+可视化生成 `docker-compose.yaml` 或 `docker run` 命令，可选择同时部署 PaoPaoDNS + Web UI，或只生成接入已有 `/data` 的 Web UI sidecar；此页面只导出配置，不写入 `/data`。
 
 ![部署生成](../docs/screenshots/deploy.png)
 
@@ -44,7 +48,7 @@ PaoPaoDNS 的 Web 配置管理面板，以 sidecar 容器方式与 PaoPaoDNS 共
 
 ### 高级配置
 
-编辑 `custom_env.ini`、`custom_mod.yaml`、`unbound_custom.conf`。页面会根据文件类型提示自动热重载、手动 reload 或重启容器。
+编辑 `custom_env.ini`、`custom_mod.yaml`、`unbound_custom.conf`。`custom_env.ini` 和 `force_ttl_rules.txt` 在检测到无法无损保留的注释或特殊语法时，会自动保留文本编辑模式，避免可视化保存重写原文件。页面会根据文件类型提示自动热重载、手动 reload 或重启容器。
 
 ![高级配置](../docs/screenshots/advanced-config.png)
 
@@ -53,9 +57,10 @@ PaoPaoDNS 的 Web 配置管理面板，以 sidecar 容器方式与 PaoPaoDNS 共
 1. 部署 PaoPaoDNS 与 Web UI，并确认两个容器共享同一个 `/data` volume 或 bind mount。
 2. 访问 `http://宿主机IP:8080`，输入 `WEB_UI_TOKEN` 完成鉴权；本机访问也可使用 `http://127.0.0.1:8080`。
 3. 在「概览」确认 `/data` 可读写、文件存在状态和热重载条件。
-4. 在「域名列表」「TTL 规则」「高级配置」中编辑对应文件并保存。
-5. 根据保存后的提示判断配置是否已自动热重载；如果提示需要 reload 或重启，请在宿主机执行对应操作。
-6. 如需重新部署，可在「部署配置」中导出 `docker-compose.yaml` 或 `docker run` 命令。
+4. 如需排查 DNS 可用性，可在「概览」的 DNS 诊断中测试 `A` / `AAAA` / `CNAME` 查询和 CN/非 CN 健康检查。
+5. 在「域名列表」「TTL 规则」「高级配置」中编辑对应文件并保存。
+6. 根据保存后的提示判断配置是否已自动热重载；如果提示需要 reload 或重启，请在宿主机执行对应操作。
+7. 如需重新部署，可在「部署配置」中导出 `docker-compose.yaml` 或 `docker run` 命令。
 
 ## 架构
 
@@ -124,6 +129,14 @@ WEB_UI_TOKEN=$(openssl rand -hex 32)
 # Web UI 镜像；默认使用 GHCR 预构建镜像，不需要本地 build
 PAOPAODNS_WEB_IMAGE=ghcr.io/lovest20018/paopaodns-webui:latest
 
+# 可信反向代理 IP/CIDR；只有这些来源可以传递 X-Forwarded-For
+WEB_UI_TRUSTED_PROXIES=
+
+# DNS 诊断目标；Web UI 容器必须能访问该地址和端口
+DNS_TEST_SERVER=paopaodns
+DNS_TEST_PORT=53
+DNS_TEST_TIMEOUT=3
+
 # 建议按 paopaodns-old-env.txt 中的实际值填写，仅用于 Web UI 判断热重载条件
 TZ=Asia/Shanghai
 CNAUTO=yes
@@ -165,6 +178,10 @@ docker run -d \
   -v /你的/paopaodns/data:/data \
   -e DATA_DIR=/data \
   -e WEB_UI_TOKEN="$WEB_UI_TOKEN" \
+  -e WEB_UI_TRUSTED_PROXIES="${WEB_UI_TRUSTED_PROXIES:-}" \
+  -e DNS_TEST_SERVER="${DNS_TEST_SERVER:-paopaodns}" \
+  -e DNS_TEST_PORT="${DNS_TEST_PORT:-53}" \
+  -e DNS_TEST_TIMEOUT="${DNS_TEST_TIMEOUT:-3}" \
   -e TZ="${TZ:-Asia/Shanghai}" \
   -e CNAUTO="${CNAUTO:-yes}" \
   -e CNFALL="${CNFALL:-yes}" \
@@ -194,6 +211,10 @@ docker run -d \
   -v paopaodns-data:/data \
   -e DATA_DIR=/data \
   -e WEB_UI_TOKEN="$WEB_UI_TOKEN" \
+  -e WEB_UI_TRUSTED_PROXIES="${WEB_UI_TRUSTED_PROXIES:-}" \
+  -e DNS_TEST_SERVER="${DNS_TEST_SERVER:-paopaodns}" \
+  -e DNS_TEST_PORT="${DNS_TEST_PORT:-53}" \
+  -e DNS_TEST_TIMEOUT="${DNS_TEST_TIMEOUT:-3}" \
   -e TZ="${TZ:-Asia/Shanghai}" \
   -e CNAUTO="${CNAUTO:-yes}" \
   -e CNFALL="${CNFALL:-yes}" \
@@ -223,6 +244,10 @@ services:
     environment:
       - DATA_DIR=/data
       - WEB_UI_TOKEN=${WEB_UI_TOKEN:?set WEB_UI_TOKEN, e.g. openssl rand -hex 32}
+      - WEB_UI_TRUSTED_PROXIES=${WEB_UI_TRUSTED_PROXIES:-}
+      - DNS_TEST_SERVER=${DNS_TEST_SERVER:-paopaodns}
+      - DNS_TEST_PORT=${DNS_TEST_PORT:-53}
+      - DNS_TEST_TIMEOUT=${DNS_TEST_TIMEOUT:-3}
       # 建议镜像 PaoPaoDNS 的关键启动变量，便于 Web UI 准确判断热重载条件
       - CNAUTO=${CNAUTO:-yes}
       - CN_TRACKER=${CN_TRACKER:-yes}
@@ -244,6 +269,10 @@ services:
 | `DATA_DIR` | `/data` | PaoPaoDNS 数据目录路径 |
 | `WEB_UI_TOKEN` | _(空)_ | 访问 API 的认证 Token。**必须设置**，否则默认拒绝访问 |
 | `WEB_UI_ALLOW_NO_AUTH` | `false` | 设为 `true` 允许无 Token 访问（不推荐） |
+| `WEB_UI_TRUSTED_PROXIES` | _(空)_ | 可信反向代理 IP/CIDR；只有这些来源可以传递 `X-Forwarded-For` |
+| `DNS_TEST_SERVER` | `paopaodns` | DNS 诊断目标地址 |
+| `DNS_TEST_PORT` | `53` | DNS 诊断目标端口 |
+| `DNS_TEST_TIMEOUT` | `3` | DNS 查询超时时间（秒） |
 | `CNAUTO` / `CN_TRACKER` / `USE_MARK_DATA` / `CUSTOM_FORWARD` / `RULES_TTL` | _(可选)_ | 建议与 PaoPaoDNS 容器保持一致，仅用于 Web UI 判断文件是否会被当前运行配置自动热重载 |
 
 ## 鉴权说明
@@ -296,6 +325,8 @@ Web UI 保存后会根据当前配置自动判断并提示热重载状态。由�
 - **安全写入** — 写入前复制 `.bak` 备份，然后原路径写入/截断，确保 PaoPaoDNS 对单文件路径的 inotify 监听能收到变更事件
 - **写入大小限制** — 单次写入最大 2MB，按文件类型细分
 - **Token 鉴权** — 默认强制认证，仅支持 Bearer token
+- **DNS 诊断限流** — `/api/dns-test` 每分钟 10 次，`/api/health-check` 每分钟 5 次，按接口和客户端 IP 独立计数
+- **可信代理控制** — 默认忽略 `X-Forwarded-For`；只有直接连接来源匹配 `WEB_UI_TRUSTED_PROXIES` 时才采信
 - **敏感变量 mask** — 含 TOKEN/PASSWORD/SECRET/KEY 的值在 API 中显示为 `***`
 - **端口暴露可控** — 默认示例暴露 `8080:8080` 便于局域网访问；只需本机访问时可改为 `127.0.0.1:8080:8080`
 
@@ -308,11 +339,13 @@ Web UI 保存后会根据当前配置自动判断并提示热重载状态。由�
 - 当前运行配置总览（CNAUTO、IPv6、域名标记库）
 - DNS 解析架构图（根据 CNAUTO 自动切换）
 - /data 文件存在状态和热重载条件
+- DNS 查询与 CN/非 CN 健康检查
 
 ### 环境变量
 
-- 显示 custom_env.ini 中的运行时覆盖值（只读）
-- 对比默认值，标记已覆盖项
+- 显示 Web UI 后端当前可见的生效运行参数（只读）
+- 按 `custom_env.ini`、Web 容器环境或默认值标记来源
+- 对 `custom_env.ini` 中存在但被注释的变量标记“custom_env 已禁用”
 - 引导到高级配置页面进行修改
 
 ### 域名列表
@@ -356,8 +389,12 @@ npm run build
 # 运行后端（开发）
 cd backend
 pip install -r requirements.txt
-DATA_DIR=/path/to/paopaodns/data WEB_UI_ALLOW_NO_AUTH=true python app.py
+cp .env.example .env
+# 编辑 .env，至少设置 WEB_UI_TOKEN 和 DATA_DIR
+python app.py
 ```
+
+`python app.py` 会自动读取 `web/backend/.env`，但已经导出的同名环境变量优先生效。
 
 ## 技术栈
 
@@ -380,7 +417,7 @@ DATA_DIR=/path/to/paopaodns/data WEB_UI_ALLOW_NO_AUTH=true python app.py
 ## 注意事项
 
 - Web UI 保存 `custom_mod.yaml` 后不会自动生效，需要在宿主机执行 `docker exec paopaodns reload.sh`
-- Web UI 无法查看 Docker 启动时的环境变量（需要 Docker socket），只能查看 custom_env.ini 中的覆盖值
+- Web UI 无法查看 Docker 启动时的环境变量（需要 Docker socket）；请把关键变量同步到 Web UI 容器，`custom_env.ini` 中启用的同名变量会作为运行时覆盖
 - 部署配置页面生成的命令仅用于导出，不会修改任何文件
 - 建议将 8080 端口放在反向代理后面，并启用 HTTPS
 - 本仓库独立于 PaoPaoDNS 原项目，原项目更新不影响 Web UI，Web UI 也不影响原项目
