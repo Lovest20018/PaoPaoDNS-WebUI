@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -83,6 +84,33 @@ def test_disallowed_file_is_rejected(client):
     response = put_file(client, "not_allowed.txt", "x")
 
     assert response.status_code == 403
+
+
+def test_nonexistent_file_returns_404_without_content(client):
+    """Test that 404 response does not include 'content' field."""
+    response = client.get("/api/file/custom_env.ini", headers=AUTH_HEADERS)
+
+    assert response.status_code == 404
+    data = response.get_json()
+    assert "error" in data
+    assert "not found" in data["error"].lower()
+    assert "content" not in data  # Should NOT have content field on 404
+    assert data["filename"] == "custom_env.ini"
+
+
+def test_existing_empty_file_returns_200_with_empty_content(client, tmp_path):
+    """Test that an existing empty file returns 200 with empty string content."""
+    # Create an empty file
+    empty_file = tmp_path / "custom_env.ini"
+    empty_file.write_text("", encoding="utf-8")
+
+    response = client.get("/api/file/custom_env.ini", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "content" in data  # Should have content field
+    assert data["content"] == ""  # Content is empty string
+    assert data["filename"] == "custom_env.ini"
 
 
 def test_non_string_content_is_rejected(client):
@@ -213,3 +241,187 @@ def test_health_check_aggregates_dns_tests(client, monkeypatch):
     assert response.get_json()["pass"] is True
     assert response.get_json()["server"] == "dns.local"
     assert response.get_json()["port"] == 5353
+
+
+def test_dns_test_rate_limit(client, monkeypatch):
+    """Test that DNS test API enforces rate limiting (10 calls per 60 seconds)."""
+    # Clear rate limit state before test
+    backend._rate_limit_state.clear()
+
+    def fake_lookup(domain, record_type, server, port):
+        return {
+            "available": True,
+            "domain": domain,
+            "record_type": record_type,
+            "server": server,
+            "port": port,
+            "results": ["1.2.3.4"],
+            "answers": [],
+            "rcode": "NOERROR",
+        }
+
+    monkeypatch.setattr(backend, "_dns_lookup", fake_lookup)
+
+    # First 10 requests should succeed
+    for i in range(10):
+        response = client.post(
+            "/api/dns-test",
+            json={"domain": f"test{i}.example.com", "record_type": "A"},
+            headers=AUTH_HEADERS,
+        )
+        assert response.status_code == 200, f"Request {i+1} should succeed"
+
+    # 11th request should be rate limited
+    response = client.post(
+        "/api/dns-test",
+        json={"domain": "test11.example.com", "record_type": "A"},
+        headers=AUTH_HEADERS,
+    )
+    assert response.status_code == 429
+    assert "Rate limit exceeded" in response.get_json()["error"]
+
+
+def test_health_check_rate_limit(client, monkeypatch):
+    """Test that health check API enforces rate limiting (5 calls per 60 seconds)."""
+    # Clear rate limit state before test
+    backend._rate_limit_state.clear()
+
+    def fake_health_check(server, port):
+        return {
+            "pass": True,
+            "server": server,
+            "port": port,
+            "tests": {},
+        }
+
+    monkeypatch.setattr(backend, "_run_health_check", fake_health_check)
+
+    # First 5 requests should succeed
+    for i in range(5):
+        response = client.get("/api/health-check", headers=AUTH_HEADERS)
+        assert response.status_code == 200, f"Request {i+1} should succeed"
+
+    # 6th request should be rate limited
+    response = client.get("/api/health-check", headers=AUTH_HEADERS)
+    assert response.status_code == 429
+    assert "Rate limit exceeded" in response.get_json()["error"]
+
+
+def test_rate_limits_are_scoped_per_endpoint(client, monkeypatch):
+    backend._rate_limit_state.clear()
+
+    def fake_lookup(domain, record_type, server, port):
+        return {
+            "available": True,
+            "domain": domain,
+            "record_type": record_type,
+            "server": server,
+            "port": port,
+            "results": ["1.2.3.4"],
+            "answers": [],
+            "rcode": "NOERROR",
+        }
+
+    def fake_health_check(server, port):
+        return {
+            "pass": True,
+            "server": server,
+            "port": port,
+            "tests": {},
+        }
+
+    monkeypatch.setattr(backend, "_dns_lookup", fake_lookup)
+    monkeypatch.setattr(backend, "_run_health_check", fake_health_check)
+
+    for i in range(5):
+        response = client.post(
+            "/api/dns-test",
+            json={"domain": f"test{i}.example.com", "record_type": "A"},
+            headers=AUTH_HEADERS,
+        )
+        assert response.status_code == 200
+
+    response = client.get("/api/health-check", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+
+
+def test_rate_limit_uses_remote_addr_by_default(client, monkeypatch):
+    backend._rate_limit_state.clear()
+
+    def fake_lookup(domain, record_type, server, port):
+        return {
+            "available": True,
+            "domain": domain,
+            "record_type": record_type,
+            "server": server,
+            "port": port,
+            "results": ["1.2.3.4"],
+            "answers": [],
+            "rcode": "NOERROR",
+        }
+
+    monkeypatch.setattr(backend, "_dns_lookup", fake_lookup)
+
+    for i in range(10):
+        headers = {**AUTH_HEADERS, "X-Forwarded-For": f"198.51.100.{i}"}
+        response = client.post(
+            "/api/dns-test",
+            json={"domain": f"test{i}.example.com", "record_type": "A"},
+            headers=headers,
+        )
+        assert response.status_code == 200
+
+    response = client.post(
+        "/api/dns-test",
+        json={"domain": "test11.example.com", "record_type": "A"},
+        headers={**AUTH_HEADERS, "X-Forwarded-For": "198.51.100.250"},
+    )
+
+    assert response.status_code == 429
+
+
+def test_dotenv_file_populates_missing_environment(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join([
+            "WEB_UI_TOKEN=from-dotenv",
+            'DATA_DIR="/tmp/paopao data"',
+            "WEB_UI_ALLOW_NO_AUTH=true",
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("WEB_UI_TOKEN", raising=False)
+    monkeypatch.delenv("WEB_UI_ALLOW_NO_AUTH", raising=False)
+    monkeypatch.setenv("DATA_DIR", "already-set")
+
+    backend._load_dotenv_file(env_file)
+
+    assert os.environ["WEB_UI_TOKEN"] == "from-dotenv"
+    assert os.environ["DATA_DIR"] == "already-set"
+    assert os.environ["WEB_UI_ALLOW_NO_AUTH"] == "true"
+
+
+def test_logging_on_auth_failure(client, caplog):
+    """Test that authentication failures are logged."""
+    import logging
+    caplog.set_level(logging.WARNING)
+
+    response = client.get("/api/status")  # No auth header
+
+    assert response.status_code == 401
+    assert any("Authentication failed" in record.message for record in caplog.records)
+
+
+def test_logging_on_file_write(client, tmp_path, caplog):
+    """Test that file write operations are logged."""
+    import logging
+    caplog.set_level(logging.INFO)
+
+    response = put_file(client, "custom_env.ini", 'CNAUTO="yes"\n')
+
+    assert response.status_code == 200
+    # Check for write log messages
+    messages = [record.message for record in caplog.records]
+    assert any("Writing file 'custom_env.ini'" in msg for msg in messages)
+    assert any("Successfully wrote 'custom_env.ini'" in msg for msg in messages)

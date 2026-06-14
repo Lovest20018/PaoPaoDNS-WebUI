@@ -9,13 +9,26 @@ import os
 import shutil
 import re
 import hmac
+import ipaddress
 import secrets
 import socket
 import struct
 import threading
 import time
+import logging
+from collections import defaultdict
+from functools import wraps
 from urllib.parse import urlparse
 from flask import Flask, jsonify, request, send_from_directory
+
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 
 def _env_int(key: str, default: int) -> int:
@@ -31,6 +44,38 @@ def _env_float(key: str, default: float) -> float:
     except (TypeError, ValueError):
         return default
 
+
+def _load_dotenv_file(path) -> None:
+    """Load simple KEY=VALUE pairs without overriding existing environment."""
+    if not os.path.exists(path):
+        return
+
+    key_re = re.compile(r"^[_a-zA-Z][_a-zA-Z0-9]*$")
+    try:
+        with open(path, "r", encoding="utf-8") as env_file:
+            for line in env_file:
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if stripped.startswith("export "):
+                    stripped = stripped[7:].strip()
+                if "=" not in stripped:
+                    continue
+
+                key, value = stripped.split("=", 1)
+                key = key.strip()
+                if not key_re.match(key):
+                    continue
+
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                    value = value[1:-1]
+                os.environ.setdefault(key, value)
+    except OSError:
+        return
+
+
+_load_dotenv_file(os.path.join(os.path.dirname(__file__), ".env"))
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 WEB_UI_TOKEN = os.environ.get("WEB_UI_TOKEN", "")
@@ -85,6 +130,87 @@ app = Flask(__name__, static_folder="./dist", static_url_path="/")
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 
 
+# Rate limiting state (in-memory)
+_rate_limit_state = defaultdict(list)
+_rate_limit_lock = threading.Lock()
+
+
+def _trusted_proxy_networks() -> list:
+    values = os.environ.get("WEB_UI_TRUSTED_PROXIES", "")
+    networks = []
+    for raw_value in values.split(","):
+        value = raw_value.strip()
+        if not value:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(value, strict=False))
+        except ValueError:
+            logger.warning(f"Ignoring invalid trusted proxy entry: {value}")
+    return networks
+
+
+def _is_trusted_proxy(ip: str | None) -> bool:
+    if not ip:
+        return False
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(address in network for network in _trusted_proxy_networks())
+
+
+def _client_ip() -> str:
+    remote_addr = request.remote_addr or "unknown"
+    if _is_trusted_proxy(remote_addr):
+        forwarded_for = request.headers.get("X-Forwarded-For", "")
+        forwarded_ip = forwarded_for.split(",", 1)[0].strip()
+        if forwarded_ip:
+            return forwarded_ip
+    return remote_addr
+
+
+def rate_limit(max_calls: int = 10, window: int = 60):
+    """Rate limiting decorator.
+
+    Args:
+        max_calls: Maximum number of calls allowed within the window
+        window: Time window in seconds
+
+    Returns 429 when rate limit is exceeded.
+    """
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            client_ip = _client_ip()
+            bucket_key = (request.endpoint or request.path, client_ip)
+
+            now = time.time()
+
+            with _rate_limit_lock:
+                # Clean up old entries
+                calls = _rate_limit_state[bucket_key]
+                calls[:] = [timestamp for timestamp in calls if now - timestamp < window]
+
+                # Check rate limit
+                if len(calls) >= max_calls:
+                    oldest = calls[0] if calls else now
+                    retry_after = int(window - (now - oldest)) + 1
+                    logger.warning(
+                        f"Rate limit exceeded for {client_ip} on {request.method} {request.path} "
+                        f"({len(calls)}/{max_calls} calls in {window}s window)"
+                    )
+                    return jsonify({
+                        "error": f"Rate limit exceeded. Try again in {retry_after} seconds."
+                    }), 429
+
+                # Record this call
+                calls.append(now)
+
+            return f(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
 # Files that auto-reload via inotifywait in PaoPaoDNS (unconditional)
 UNCONDITIONAL_AUTO_RELOAD = {
     "custom_env.ini",
@@ -135,6 +261,11 @@ HEALTH_CHECK_DOMAINS = {
     "cn": "www.baidu.com",
     "non_cn": "www.google.com",
 }
+
+# DNS name compression constants
+DNS_MAX_COMPRESSION_DEPTH = 10  # Maximum pointer depth to prevent infinite loops
+DNS_MAX_LABEL_LENGTH = 63       # Maximum DNS label length (RFC 1035)
+DNS_MAX_NAME_LENGTH = 253       # Maximum DNS name length (RFC 1035)
 
 
 def _check_auth() -> bool:
@@ -366,7 +497,7 @@ def _read_file(filename: str) -> tuple[str | None, int]:
     if path is None:
         return None, 403
     if not os.path.exists(path):
-        return "", 404
+        return None, 404
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             return f.read(), 200
@@ -493,13 +624,13 @@ def _normalize_domain(domain: str) -> tuple[str | None, str]:
     except UnicodeError:
         return None, "Invalid domain"
 
-    if len(ascii_domain) > 253:
+    if len(ascii_domain) > DNS_MAX_NAME_LENGTH:
         return None, "Domain is too long"
 
     labels = ascii_domain.split(".")
     label_re = re.compile(r"^[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?$")
     for label in labels:
-        if not label or len(label) > 63 or not label_re.match(label):
+        if not label or len(label) > DNS_MAX_LABEL_LENGTH or not label_re.match(label):
             return None, "Invalid domain label"
 
     return ascii_domain, ""
@@ -543,7 +674,7 @@ def _encode_dns_name(domain: str) -> bytes:
 
 def _read_dns_name(packet: bytes, offset: int, depth: int = 0) -> tuple[str, int]:
     """Read a possibly-compressed DNS name from a packet."""
-    if depth > 10:
+    if depth > DNS_MAX_COMPRESSION_DEPTH:
         raise ValueError("DNS name compression pointer loop")
 
     labels = []
@@ -573,7 +704,7 @@ def _read_dns_name(packet: bytes, offset: int, depth: int = 0) -> tuple[str, int
             cursor = pointer
             jumped = True
             depth += 1
-            if depth > 10:
+            if depth > DNS_MAX_COMPRESSION_DEPTH:
                 raise ValueError("DNS name compression pointer loop")
             continue
 
@@ -771,6 +902,8 @@ def auth_middleware():
     """Check authentication on all /api/ routes."""
     if request.path.startswith("/api/"):
         if not _check_auth():
+            client_ip = _client_ip()
+            logger.warning(f"Authentication failed from {client_ip} for {request.method} {request.path}")
             return jsonify({"error": "Unauthorized"}), 401
 
 
@@ -830,7 +963,7 @@ def api_read_file(filename):
     if status == 403:
         return jsonify({"error": "File not allowed"}), 403
     if status == 404:
-        return jsonify({"filename": filename, "content": "", "error": "File not found"}), 404
+        return jsonify({"filename": filename, "error": "File not found"}), 404
     if status == 500:
         return jsonify({"error": "Failed to read file"}), 500
     env = _runtime_env()
@@ -844,27 +977,36 @@ def api_read_file(filename):
 @app.route("/api/file/<filename>", methods=["PUT"])
 def api_write_file(filename):
     """Write a configuration file to /data in-place with backup."""
+    client_ip = _client_ip()
+
     data = request.get_json()
     if not data or "content" not in data:
         return jsonify({"error": "Missing content"}), 400
 
     if _safe_path(filename) is None:
+        logger.warning(f"Rejected write attempt to disallowed file '{filename}' from {client_ip}")
         return jsonify({"error": "File not allowed"}), 403
 
     content = data["content"]
     if not isinstance(content, str):
         return jsonify({"error": "Content must be a string"}), 400
 
+    content_size = len(content.encode("utf-8"))
+    logger.info(f"Writing file '{filename}' ({content_size} bytes) from {client_ip}")
+
     valid, err = _validate_file_content(filename, content)
     if not valid:
+        logger.warning(f"Validation failed for '{filename}' from {client_ip}: {err}")
         return jsonify({"error": f"Content validation failed: {err}"}), 400
 
     size_err = _content_size_error(filename, content)
     if size_err:
+        logger.warning(f"Size limit exceeded for '{filename}' from {client_ip}: {size_err}")
         return jsonify({"error": size_err}), 413
 
     success, err = _atomic_write(filename, content)
     if success:
+        logger.info(f"Successfully wrote '{filename}' ({content_size} bytes) from {client_ip}")
         env = _runtime_env()
         reload_info = _file_reload_info(filename, env)
         return jsonify({
@@ -872,12 +1014,16 @@ def api_write_file(filename):
             "filename": filename,
             **reload_info,
         })
+    logger.error(f"Failed to write '{filename}' from {client_ip}: {err}")
     return jsonify({"error": f"Failed to write file: {err}"}), 500
 
 
 @app.route("/api/dns-test", methods=["POST"])
+@rate_limit(max_calls=10, window=60)
 def api_dns_test():
     """Run a DNS lookup against the configured PaoPaoDNS service."""
+    client_ip = _client_ip()
+
     data = request.get_json(silent=True) or {}
     domain = data.get("domain", "")
     record_type = data.get("record_type", "A")
@@ -892,12 +1038,31 @@ def api_dns_test():
     if error:
         return jsonify({"error": error}), 400
 
-    return jsonify(_dns_lookup(normalized_domain, normalized_type, normalized_server, normalized_port))
+    logger.info(
+        f"DNS query from {client_ip}: {normalized_domain} {normalized_type} "
+        f"@{normalized_server}:{normalized_port}"
+    )
+    result = _dns_lookup(normalized_domain, normalized_type, normalized_server, normalized_port)
+
+    if result.get("available"):
+        logger.info(
+            f"DNS query succeeded: {normalized_domain} -> {len(result.get('answers', []))} answers, "
+            f"{result.get('elapsed_ms', 0)}ms"
+        )
+    else:
+        logger.warning(
+            f"DNS query failed for {normalized_domain}: {result.get('error', 'unknown error')}"
+        )
+
+    return jsonify(result)
 
 
 @app.route("/api/health-check")
+@rate_limit(max_calls=5, window=60)
 def api_health_check():
     """Run a small CN/non-CN DNS health check."""
+    client_ip = _client_ip()
+
     server = request.args.get("server") or DNS_TEST_SERVER
     port = request.args.get("port") or DNS_TEST_PORT
 
@@ -907,7 +1072,17 @@ def api_health_check():
     if error:
         return jsonify({"error": error}), 400
 
-    return jsonify(_run_health_check(normalized_server, normalized_port))
+    logger.info(f"Health check from {client_ip} @{normalized_server}:{normalized_port}")
+    result = _run_health_check(normalized_server, normalized_port)
+
+    if result.get("pass"):
+        logger.info(f"Health check passed: {normalized_server}:{normalized_port}")
+    else:
+        logger.warning(
+            f"Health check failed: {normalized_server}:{normalized_port} - {result.get('error', 'unknown')}"
+        )
+
+    return jsonify(result)
 
 
 @app.route("/api/health")
@@ -929,4 +1104,10 @@ def serve_spa(path):
 
 
 if __name__ == "__main__":
+    logger.info("=" * 60)
+    logger.info("PaoPaoDNS Web UI Backend Starting")
+    logger.info(f"Data directory: {DATA_DIR}")
+    logger.info(f"Authentication: {'enabled' if WEB_UI_TOKEN else 'disabled (allow_no_auth=' + str(WEB_UI_ALLOW_NO_AUTH) + ')'}")
+    logger.info(f"DNS test target: {DNS_TEST_SERVER}:{DNS_TEST_PORT} (timeout: {DNS_TEST_TIMEOUT}s)")
+    logger.info("=" * 60)
     app.run(host="0.0.0.0", port=8080, debug=False)
