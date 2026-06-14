@@ -1,26 +1,27 @@
 # PaoPaoDNS Web UI
 
-一个给 [PaoPaoDNS](https://github.com/kkkgo/PaoPaoDNS) 使用的 Web 配置面板。
+一个给 [PaoPaoDNS](https://github.com/kkkgo/PaoPaoDNS) 使用的非官方 Web 配置管理面板。
 
-它以 sidecar 容器方式运行，和 PaoPaoDNS 共享同一个 `/data` 目录，用来查看、编辑常用配置文件。Web UI 不挂载 Docker socket，不控制主容器，只负责安全地读写 `/data` 中的配置文件。
+它以 sidecar 容器方式运行，和 PaoPaoDNS 共享同一个 `/data` 目录，用来查看、编辑常用配置文件，并根据当前运行条件提示保存后是否会自动热重载。Web UI 不挂载 Docker socket，不控制主容器，也不修改 PaoPaoDNS 原项目文件，只负责安全地读写共享 `/data` 中的白名单配置文件。
 
-> 适合已经在用 PaoPaoDNS，但不想每次都手动编辑 `custom_env.ini`、各种 `force_*_list.txt`、`force_ttl_rules.txt` 的用户。
+> 适合已经在用 PaoPaoDNS，但不想每次都手动编辑 `custom_env.ini`、各种 `force_*_list.txt`、`force_ttl_rules.txt`，也希望快速生成 sidecar 部署配置的用户。
 
 ## 主要功能
 
-- 查看 `/data` 目录状态、认证状态、配置文件是否存在
+- 查看 `/data` 目录状态、认证状态、DNS 架构、关键运行配置和配置文件是否存在
 - 查看文件保存后是否会自动热重载，以及未生效原因
 - DNS 诊断：对目标 DNS 服务执行 A / AAAA / CNAME 查询和 CN/非 CN 健康检查
-- 编辑 `custom_env.ini`，支持启用/禁用变量
+- 查看当前生效环境变量，并标记来源：`custom_env.ini`、Web 容器环境或默认值
+- 编辑 `custom_env.ini`，支持启用/禁用变量；遇到无法无损保留的注释或语法时自动保持文本编辑
 - 编辑域名列表：
   - `force_forward_list.txt`
   - `force_dnscrypt_list.txt`
   - `force_recurse_list.txt`
   - `custom_cn_mark.txt`
   - `trackerslist.txt`（Tracker URL 列表，仅文本编辑）
-- 编辑 `force_ttl_rules.txt`，支持 `@`、`@@`、`@@@` 规则
-- 编辑 `custom_mod.yaml`、`unbound_custom.conf`
-- 生成 docker compose / docker run 部署配置，支持完整部署和仅 Web UI sidecar 两种模式
+- 编辑 `force_ttl_rules.txt`，支持 `@`、`@@`、`@@@` 规则；复杂原文会保留文本编辑，避免保存时重写
+- 编辑 `custom_mod.yaml`、`unbound_custom.conf`，并区分自动热重载、手动 reload 和重启容器
+- 生成 docker compose / docker run 部署配置，支持完整部署和仅 Web UI sidecar 两种模式，可导入 `custom_env.ini` 覆盖项
 - 后端保存前校验文件内容和大小，写入时保留 `.bak` 备份并在失败时回滚
 - 支持亮色/暗色主题
 
@@ -31,6 +32,10 @@
 查看 `/data` 目录读写状态、Token 鉴权状态、关键配置文件是否存在、各文件保存后的热重载条件，以及 DNS 查询诊断结果。
 
 ![概览](docs/screenshots/overview.png)
+
+### 环境变量
+
+只读展示 Web UI 后端当前可见的运行参数，并按来源标记为 `custom_env.ini`、Web 容器环境或默认值。`custom_env.ini` 中被注释的同名变量会显示为“custom_env 已禁用”，便于区分“定义过但未启用”和“当前真正生效”的值。
 
 ### 域名列表
 
@@ -52,7 +57,7 @@
 
 ### 高级配置
 
-编辑 `custom_env.ini`、`custom_mod.yaml`、`unbound_custom.conf`。页面会根据文件类型提示自动热重载、手动 reload 或重启容器。
+编辑 `custom_env.ini`、`custom_mod.yaml`、`unbound_custom.conf`。`custom_env.ini` 和 `force_ttl_rules.txt` 在检测到无法无损保留的注释或特殊语法时，会自动保留文本编辑模式，避免可视化保存重写原文件。页面会根据文件类型提示自动热重载、手动 reload 或重启容器。
 
 ![高级配置](docs/screenshots/advanced-config.png)
 
@@ -133,6 +138,10 @@ WEB_UI_TOKEN=$(openssl rand -hex 32)
 # Web UI 镜像；默认使用 GHCR 预构建镜像，不需要本地 build
 PAOPAODNS_WEB_IMAGE=ghcr.io/lovest20018/paopaodns-webui:latest
 
+# 可信反向代理 IP/CIDR；只有这些来源可以传递 X-Forwarded-For
+# 直接暴露 Web UI 或不使用反向代理时保持为空
+WEB_UI_TRUSTED_PROXIES=
+
 # DNS 诊断目标；Web UI 容器必须能访问该地址和端口
 DNS_TEST_SERVER=paopaodns
 DNS_TEST_PORT=53
@@ -182,6 +191,7 @@ docker run -d \
   -v /opt/paopaodns/data:/data \
   -e DATA_DIR=/data \
   -e WEB_UI_TOKEN="$WEB_UI_TOKEN" \
+  -e WEB_UI_TRUSTED_PROXIES="${WEB_UI_TRUSTED_PROXIES:-}" \
   -e DNS_TEST_SERVER="${DNS_TEST_SERVER:-paopaodns}" \
   -e DNS_TEST_PORT="${DNS_TEST_PORT:-53}" \
   -e DNS_TEST_TIMEOUT="${DNS_TEST_TIMEOUT:-3}" \
@@ -214,6 +224,7 @@ docker run -d \
   -v paopaodns-data:/data \
   -e DATA_DIR=/data \
   -e WEB_UI_TOKEN="$WEB_UI_TOKEN" \
+  -e WEB_UI_TRUSTED_PROXIES="${WEB_UI_TRUSTED_PROXIES:-}" \
   -e DNS_TEST_SERVER="${DNS_TEST_SERVER:-paopaodns}" \
   -e DNS_TEST_PORT="${DNS_TEST_PORT:-53}" \
   -e DNS_TEST_TIMEOUT="${DNS_TEST_TIMEOUT:-3}" \
@@ -245,6 +256,8 @@ Web UI 不挂 Docker socket，所以它不能直接读取另一个容器的启�
 
 ```yaml
 - CNAUTO=yes
+- CNFALL=yes
+- IPV6=no
 - CN_TRACKER=yes
 - USE_MARK_DATA=yes
 - CUSTOM_FORWARD=
@@ -277,9 +290,13 @@ DNS_TEST_TIMEOUT=3
 
 此功能不执行 shell 命令，也不会读取 PaoPaoDNS 容器内部进程、Redis 或 Unbound 状态；它只用于验证 Web UI 容器到 DNS 服务的网络可达性和解析结果。
 
+DNS 诊断接口会按“接口 + 客户端 IP”限流：`/api/dns-test` 为每分钟 10 次，`/api/health-check` 为每分钟 5 次。默认客户端 IP 来自直接连接地址；只有当直接连接来源匹配 `WEB_UI_TRUSTED_PROXIES` 时，后端才会采信 `X-Forwarded-For`。
+
 ### 环境变量
 
-只读展示 `custom_env.ini` 中定义的变量覆盖。需要修改时请到“高级配置”。
+只读展示 Web UI 后端当前可见的生效运行参数。页面会先读取 Web UI 容器环境，再用 `custom_env.ini` 中已启用的同名变量覆盖，并在“来源”列标记为 `custom_env.ini`、Web 容器环境或默认值。
+
+如果某个变量在 `custom_env.ini` 中存在但被 `#` 注释，页面会显示“custom_env 已禁用”。这表示该变量“定义过但未启用”，当前生效值仍来自 Web 容器环境或默认值，并不代表整个 `custom_env.ini` 功能失效。需要修改变量覆盖时请到“高级配置”。
 
 ### 域名列表
 
@@ -333,6 +350,7 @@ example.com@@@target.example.net
 - 默认示例会暴露宿主机 `8080` 端口，便于局域网访问。
 - 如果只希望本机访问，请把端口映射改为 `127.0.0.1:8080:8080`。
 - 如果要通过公网访问，建议放到反向代理后面，并启用 HTTPS。
+- 如果反向代理会覆盖 `X-Forwarded-For`，可把代理 IP 或 CIDR 写入 `WEB_UI_TRUSTED_PROXIES`；不要把不可信客户端网段加入该列表。
 - 不建议设置 `WEB_UI_ALLOW_NO_AUTH=true`，除非你明确知道风险。
 
 ## 常见问题
@@ -378,6 +396,20 @@ DNS 诊断失败通常表示 Web UI 容器无法访问配置的 DNS 服务，而
 
 请按页面报错行号修正后再保存。写入时会保留 `.bak` 备份，并在写入失败时尽量回滚到旧内容。
 
+### “custom_env 已禁用”是什么意思？
+
+它只针对单个变量。例如 `custom_env.ini` 中存在：
+
+```ini
+#IPV6="yes_only6"
+```
+
+Web UI 会认为 `IPV6` 这个覆盖项存在，但由于前面有 `#`，所以没有启用。此时环境变量页会显示“custom_env 已禁用”，当前生效值会继续来自 Web 容器环境或默认值。去掉 `#` 并保存后，才会由 `custom_env.ini` 接管该变量。
+
+### 为什么高级配置会提示无法无损保留？
+
+`custom_env.ini` 或 `force_ttl_rules.txt` 可能包含注释、空行、特殊写法或当前可视化表单暂时无法完整表达的语法。为避免切到可视化编辑后保存时重写原文件、丢失注释或格式，页面会自动保留文本编辑模式。这个提示不表示配置失效，只是保护原文。
+
 ### 部署生成会直接修改我的容器吗？
 
 不会。部署生成页面只生成 `docker compose` 或 `docker run` 文本，不会执行命令，也不会修改 `/data`。
@@ -421,8 +453,12 @@ npm --prefix web run build
 ```bash
 cd web/backend
 pip install -r requirements.txt
-DATA_DIR=/path/to/paopaodns/data WEB_UI_ALLOW_NO_AUTH=true python app.py
+cp .env.example .env
+# 编辑 .env，至少设置 WEB_UI_TOKEN 和 DATA_DIR
+python app.py
 ```
+
+`python app.py` 会自动读取 `web/backend/.env`，但已经导出的同名环境变量优先生效。
 
 后端测试：
 
