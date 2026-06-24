@@ -150,56 +150,81 @@ export default function OverviewPage() {
   }
 
   if (error) {
+    const isUnauthorized = error.includes('Unauthorized');
+    const tokenToggleLabel = tokenVisible ? '隐藏 WEB_UI_TOKEN' : '显示 WEB_UI_TOKEN';
+
     return (
       <div>
-        <div className="page-header page-header-row">
+        <div className="page-header page-header-row page-header-compact-mobile">
           <div className="page-header-meta">
           <h2>概览</h2>
           <p>PaoPaoDNS /data 目录状态和配置总览</p>
           </div>
           <div className="page-header-actions">
-            <button className="btn btn-secondary btn-sm" onClick={loadStatus}>
+            <button className="btn btn-secondary btn-sm" onClick={loadStatus} type="button">
               <RefreshCw size={14} /> 刷新
             </button>
           </div>
         </div>
-        <div className="card alert-card alert-danger">
-          <div className="alert-icon" style={{ background: 'rgba(251, 113, 133, 0.14)', color: 'var(--accent-red)' }}>
-            <XCircle size={22} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div className="alert-title">连接失败</div>
-            <div className="alert-desc">{error}</div>
-            <div className="alert-desc" style={{ marginTop: 10 }}>
-              请确认 PaoPaoDNS 容器和 Web UI 后端服务正在运行。<br />
-              docker compose -f docker-compose-web.yaml up -d
+
+        <div className={`card connection-panel ${isUnauthorized ? 'alert-info' : 'alert-danger'}`}>
+          <div className="connection-panel-main">
+            <div className="alert-icon" style={{ background: isUnauthorized ? 'rgba(34, 211, 238, 0.12)' : 'rgba(251, 113, 133, 0.14)', color: isUnauthorized ? 'var(--accent-cyan)' : 'var(--accent-red)' }}>
+              {isUnauthorized ? <Key size={22} /> : <XCircle size={22} />}
+            </div>
+            <div className="connection-copy">
+              <div className="alert-title">{isUnauthorized ? '需要 WEB_UI_TOKEN' : '连接失败'}</div>
+              <div className="alert-desc">
+                {isUnauthorized
+                  ? '后端已启用访问 Token。输入 WEB_UI_TOKEN 后验证连接。'
+                  : error}
+              </div>
+              {isUnauthorized && <div className="connection-error-text">{error}</div>}
             </div>
           </div>
-          {error.includes('Unauthorized') && (
-            <div className="card alert-info" style={{ marginTop: 18, marginBottom: 16 }}>
-              <div className="card-title"><Key size={16} /> Token 验证</div>
-              <div className="form-row">
-                <div className="form-group" style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input
-                      className="form-input"
-                      type={tokenVisible ? 'text' : 'password'}
-                      value={tokenInput}
-                      onChange={(e) => setTokenInput(e.target.value)}
-                      placeholder="输入 WEB_UI_TOKEN"
-                    />
-                    <button className="btn btn-secondary btn-sm" onClick={() => setTokenVisible(!tokenVisible)}>
-                      {tokenVisible ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                    <button className="btn btn-primary btn-sm" onClick={handleTokenSave}>验证</button>
-                  </div>
-                </div>
+
+          {isUnauthorized && (
+            <div className="connection-auth-box">
+              <label className="form-label" htmlFor="overview-token-input">WEB_UI_TOKEN</label>
+              <div className="overview-token-row connection-token-row">
+                <input
+                  id="overview-token-input"
+                  className="form-input"
+                  type={tokenVisible ? 'text' : 'password'}
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
+                  placeholder="输入 WEB_UI_TOKEN"
+                  autoComplete="current-password"
+                />
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setTokenVisible(!tokenVisible)}
+                  type="button"
+                  title={tokenToggleLabel}
+                  aria-label={tokenToggleLabel}
+                >
+                  {tokenVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={handleTokenSave} type="button">
+                  验证并连接
+                </button>
               </div>
             </div>
           )}
-          <button className="btn btn-primary" onClick={loadStatus} style={{ marginTop: 10 }}>
-            <RefreshCw size={16} /> 重新连接
-          </button>
+
+          <div className="alert-actions connection-actions">
+            <button className={isUnauthorized ? 'btn btn-secondary' : 'btn btn-primary'} onClick={loadStatus} type="button">
+              <RefreshCw size={16} /> 重新检测后端
+            </button>
+          </div>
+
+          <details className="connection-troubleshooting">
+            <summary>排查步骤</summary>
+            <div className="alert-desc">
+              请确认 PaoPaoDNS 容器和 Web UI 后端服务正在运行。
+              <code>docker compose -f docker-compose-web.yaml up -d</code>
+            </div>
+          </details>
         </div>
       </div>
     );
@@ -280,8 +305,15 @@ export default function OverviewPage() {
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
               placeholder="WEB_UI_TOKEN"
+              autoComplete="current-password"
             />
-            <button className="btn btn-secondary btn-sm" onClick={() => setTokenVisible(!tokenVisible)}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setTokenVisible(!tokenVisible)}
+              type="button"
+              title={tokenVisible ? '隐藏 WEB_UI_TOKEN' : '显示 WEB_UI_TOKEN'}
+              aria-label={tokenVisible ? '隐藏 WEB_UI_TOKEN' : '显示 WEB_UI_TOKEN'}
+            >
               {tokenVisible ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
             <button className="btn btn-primary btn-sm" onClick={handleTokenSave}>保存</button>

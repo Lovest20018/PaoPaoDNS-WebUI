@@ -456,7 +456,7 @@ export default function AdvancedConfigPage() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap', cursor: 'pointer' }}>
                     <input type="checkbox" checked={entry.enabled} onChange={(e) => updateEnvEntry(i, { ...entry, enabled: e.target.checked })} />启用
                   </label>
-                  <button className="domain-remove-btn" onClick={() => removeEnvEntry(i)}><X size={16} /></button>
+                  <button className="domain-remove-btn" onClick={() => removeEnvEntry(i)} type="button" title="删除此变量" aria-label={`删除变量 ${entry.key || i + 1}`}><X size={16} /></button>
                 </div>
               ))}
 
@@ -532,7 +532,7 @@ export default function AdvancedConfigPage() {
               <div className="domain-entry" key={i} style={{ marginBottom: 8 }}>
                 <input className="form-input" style={{ width: 180, flexShrink: 0 }} type="text" value={swap.env_key} placeholder="env_key" onChange={(e) => updateSwap(i, { ...swap, env_key: e.target.value })} />
                 <input className="form-input" type="text" value={swap.cidr_file} placeholder="/data/test_cidr.txt" onChange={(e) => updateSwap(i, { ...swap, cidr_file: e.target.value })} />
-                <button className="domain-remove-btn" onClick={() => removeSwap(i)}><X size={16} /></button>
+                <button className="domain-remove-btn" onClick={() => removeSwap(i)} type="button" title="删除此 Swap" aria-label={`删除 Swap ${swap.env_key || i + 1}`}><X size={16} /></button>
               </div>
             ))}
             <button className="btn btn-secondary btn-sm" disabled={!customModVisualSafe} onClick={addSwap}><Plus size={14} /> 添加 Swap</button>
@@ -544,7 +544,7 @@ export default function AdvancedConfigPage() {
               <div className="domain-entry" key={i} style={{ marginBottom: 8 }}>
                 <input className="form-input" style={{ width: 180, flexShrink: 0 }} type="text" value={host.env_key} placeholder="env_key" onChange={(e) => updateHost(i, { ...host, env_key: e.target.value })} />
                 <input className="form-input" type="text" value={host.zone} placeholder="a.com domain:b.com" onChange={(e) => updateHost(i, { ...host, zone: e.target.value })} />
-                <button className="domain-remove-btn" onClick={() => removeHost(i)}><X size={16} /></button>
+                <button className="domain-remove-btn" onClick={() => removeHost(i)} type="button" title="删除此 Host" aria-label={`删除 Host ${host.env_key || i + 1}`}><X size={16} /></button>
               </div>
             ))}
             <button className="btn btn-secondary btn-sm" disabled={!customModVisualSafe} onClick={addHost}><Plus size={14} /> 添加 Host</button>

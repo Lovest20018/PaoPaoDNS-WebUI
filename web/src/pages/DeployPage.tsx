@@ -480,7 +480,7 @@ export default function DeployPage() {
         </p>
       </div>
 
-      <div className="stack-actions" style={{ marginBottom: 16 }}>
+      <div className="stack-actions deploy-summary">
         <span className="summary-chip">模式 {config.deploymentMode === 'full' ? '新建完整部署' : '仅 WebUI sidecar'}</span>
         {config.deploymentMode === 'full' && <span className="summary-chip">主服务 {slugifyServiceName(config.serviceName)}</span>}
         {(config.deploymentMode === 'sidecar' || config.webUi.enabled) && <span className="summary-chip">WebUI {slugifyServiceName(config.webUi.serviceName)}</span>}
@@ -489,43 +489,55 @@ export default function DeployPage() {
         <span className="summary-chip">数据 {config.dataMountType === 'volume' ? 'volume' : 'bind'}</span>
       </div>
 
-      <div className="form-panel" style={{ borderColor: 'var(--accent-amber)' }}>
-        <div className="card-title">
+      <div className="form-panel deploy-note" style={{ borderColor: 'var(--accent-amber)' }}>
+        <div className="deploy-note-main">
           <AlertTriangle size={18} style={{ color: 'var(--accent-amber)' }} />
-          说明
+          <div>
+            <div className="card-title">生成新的部署配置，不会修改现有文件</div>
+            <div className="card-desc">
+              支持完整部署或 Web UI sidecar 接入已有 PaoPaoDNS。生成结果只用于复制或下载。
+            </div>
+          </div>
         </div>
-        <div className="card-desc">
-          此页面用于生成 <strong>新的部署配置</strong>，不会修改原 PaoPaoDNS 项目的任何文件。<br />
-          可生成 PaoPaoDNS + Web UI 的完整部署，也可以只生成 Web UI sidecar 接入已有 PaoPaoDNS。<br />
-          下方环境变量会自动导入 Web UI 后端当前可见的生效变量，并在生成时同步给 Web UI sidecar；需要完整显式环境变量时可点击“展开全部默认变量”。<br />
-          Web UI 不能直接读取另一个 PaoPaoDNS 容器的启动环境变量；推荐先把 PaoPaoDNS 变量同步到 paopaodns-web 的 environment，再用这里导出新的 compose。
-        </div>
+        <details className="deploy-note-details">
+          <summary>查看详细说明</summary>
+          <div className="card-desc">
+            下方环境变量会自动导入 Web UI 后端当前可见的生效变量，并在生成时同步给 Web UI sidecar；需要完整显式环境变量时可点击“展开全部默认变量”。Web UI 不能直接读取另一个 PaoPaoDNS 容器的启动环境变量；推荐先把 PaoPaoDNS 变量同步到 paopaodns-web 的 environment，再用这里导出新的 compose。
+          </div>
+        </details>
       </div>
 
-      <div className="tab-bar">
-        <button className={`tab-item ${activeTab === 'docker-compose' ? 'active' : ''}`} onClick={() => setActiveTab('docker-compose')}>
-          <FileText size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> docker-compose
-        </button>
-        <button className={`tab-item ${activeTab === 'docker-run' ? 'active' : ''}`} onClick={() => setActiveTab('docker-run')}>
-          <Terminal size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> docker run
-        </button>
-      </div>
-
-      {activeTab === 'docker-compose' && (
-        <div className="tab-bar" style={{ marginTop: 0, borderTop: 'none' }}>
-          <button className={`tab-item ${editMode === 'edit' ? 'active' : ''}`} onClick={() => setEditMode('edit')}>
-            <Edit3 size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> 编辑配置
-          </button>
-          <button className={`tab-item ${editMode === 'preview' ? 'active' : ''}`} onClick={() => setEditMode('preview')}>
-            <FileText size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> 预览输出
-          </button>
+      <div className="deploy-control-strip">
+        <div className="deploy-control-group">
+          <span className="deploy-control-label">输出类型</span>
+          <div className="tab-bar deploy-output-tabs">
+            <button className={`tab-item ${activeTab === 'docker-compose' ? 'active' : ''}`} onClick={() => setActiveTab('docker-compose')}>
+              <FileText size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> docker-compose
+            </button>
+            <button className={`tab-item ${activeTab === 'docker-run' ? 'active' : ''}`} onClick={() => setActiveTab('docker-run')}>
+              <Terminal size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> docker run
+            </button>
+          </div>
         </div>
-      )}
+        {activeTab === 'docker-compose' && (
+          <div className="deploy-control-group">
+            <span className="deploy-control-label">当前视图</span>
+            <div className="tab-bar deploy-view-tabs">
+              <button className={`tab-item ${editMode === 'edit' ? 'active' : ''}`} onClick={() => setEditMode('edit')}>
+                <Edit3 size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> 编辑配置
+              </button>
+              <button className={`tab-item ${editMode === 'preview' ? 'active' : ''}`} onClick={() => setEditMode('preview')}>
+                <FileText size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> 预览输出
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {activeTab === 'docker-compose' && editMode === 'edit' ? (
         <>
           <div className="form-panel">
-            <div className="card-title">部署模式和共享数据</div>
+            <div className="card-title"><span className="deploy-step">1</span> 部署模式和共享数据</div>
             <div className="card-desc">
               完整部署会同时生成 PaoPaoDNS 主容器和 Web UI sidecar；sidecar 模式只生成 Web UI，用来接入已有 PaoPaoDNS 的 /data。
             </div>
@@ -581,7 +593,7 @@ export default function DeployPage() {
           <div className="split-card-grid">
           {/* Basic Settings */}
           <div className="form-panel deploy-basic-panel">
-            <div className="card-title">PaoPaoDNS 主容器</div>
+            <div className="card-title"><span className="deploy-step">2</span> PaoPaoDNS 主容器</div>
             <div className="form-row">
               <div className="form-group">
                 <label className="form-label">服务名称 <span className="form-hint" style={{ display: 'inline' }}>(Compose service key)</span></label>
@@ -635,7 +647,7 @@ export default function DeployPage() {
 
           {/* Port Mappings */}
           <div className="form-panel deploy-port-panel">
-            <div className="card-title">端口映射</div>
+            <div className="card-title"><span className="deploy-step">3</span> 端口映射</div>
             {config.ports.map((port) => (
               <div key={port.id} className="domain-entry deploy-port-row">
                 <input
@@ -665,7 +677,13 @@ export default function DeployPage() {
                   <option value="udp">UDP</option>
                   <option value="tcp+udp">TCP + UDP</option>
                 </select>
-                <button className="domain-remove-btn" onClick={() => removePort(port.id)}>
+                <button
+                  className="domain-remove-btn"
+                  onClick={() => removePort(port.id)}
+                  type="button"
+                  title="删除此端口映射"
+                  aria-label={`删除端口映射 ${port.host || '宿主机端口'}:${port.container || '容器端口'} ${port.protocol}`}
+                >
                   <X size={16} />
                 </button>
               </div>
@@ -680,7 +698,7 @@ export default function DeployPage() {
           )}
 
           <div className="form-panel">
-            <div className="card-title">Web UI sidecar</div>
+            <div className="card-title"><span className="deploy-step">4</span> Web UI sidecar</div>
             <div className="card-desc">
               Web UI 只读写共享 /data，不挂载 Docker socket。监听地址留空会绑定所有地址，便于局域网访问；公网建议配合反向代理和 HTTPS。
             </div>
@@ -798,7 +816,7 @@ export default function DeployPage() {
 
           {/* Environment Variables */}
           <div className="form-panel">
-            <div className="card-title">环境变量</div>
+            <div className="card-title"><span className="deploy-step">5</span> 环境变量</div>
             <div className="card-desc">
               这里列出 PaoPaoDNS 常用启动环境变量。已添加的变量会同时写入 PaoPaoDNS 主容器，并镜像给 Web UI sidecar 用于显示当前生效配置和判断热重载条件。
             </div>
@@ -863,6 +881,8 @@ export default function DeployPage() {
                     <button
                       className="domain-remove-btn"
                       title={isRemoved ? '恢复默认值' : '不传递此变量'}
+                      aria-label={isRemoved ? `恢复 ${envVar.key} 默认值` : `不传递 ${envVar.key}`}
+                      type="button"
                       onClick={() => {
                         if (isRemoved) {
                           updateEnvVar(envVar.key, envVar.defaultValue);
@@ -881,7 +901,7 @@ export default function DeployPage() {
 
           {/* Advanced Settings */}
           <div className="form-panel">
-            <div className="card-title">资源限制</div>
+            <div className="card-title"><span className="deploy-step">6</span> 资源限制</div>
             <div className="form-row">
               <div className="form-group">
                 <label className="form-label">CPU 限制</label>
@@ -912,7 +932,7 @@ export default function DeployPage() {
       {(activeTab === 'docker-run' || (activeTab === 'docker-compose' && editMode === 'preview')) && (
         <div className="preview-shell command-box">
           <div className="code-header">
-            <span>{activeTab === 'docker-run' ? 'docker run 命令' : 'docker-compose.yaml'}</span>
+            <span><span className="deploy-step">7</span> {activeTab === 'docker-run' ? 'docker run 命令' : 'docker-compose.yaml'}</span>
             <div className="btn-group">
               <button
                 className="code-copy-btn"

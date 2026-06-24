@@ -379,11 +379,11 @@ export default function DomainListPage() {
                     </>
                   )}
                   <div className="domain-row-actions">
-                    <button className="btn btn-secondary btn-sm" onClick={() => moveEntry(entry.id, -1)} disabled={index === 0} title="上移此行"><ArrowUp size={14} /></button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => moveEntry(entry.id, 1)} disabled={index === entries.length - 1} title="下移此行"><ArrowDown size={14} /></button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => moveEntry(entry.id, -1)} disabled={index === 0} title="上移此行" aria-label="上移此行" type="button"><ArrowUp size={14} /></button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => moveEntry(entry.id, 1)} disabled={index === entries.length - 1} title="下移此行" aria-label="下移此行" type="button"><ArrowDown size={14} /></button>
                     <button className="btn btn-secondary btn-sm" onClick={() => insertDomainAfter(entry.id)} title="在此行后插入域名"><Plus size={14} /> 域名</button>
                     <button className="btn btn-secondary btn-sm" onClick={() => insertCommentAfter(entry.id)} title="在此行后插入注释"><Plus size={14} /> 注释</button>
-                    <button className="domain-remove-btn" onClick={() => removeEntry(entry.id)} title="删除此行"><X size={16} /></button>
+                    <button className="domain-remove-btn" onClick={() => removeEntry(entry.id)} title="删除此行" aria-label="删除此行" type="button"><X size={16} /></button>
                   </div>
                 </div>
               ))}

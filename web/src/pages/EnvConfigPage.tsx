@@ -121,6 +121,30 @@ export default function EnvConfigPage() {
         const Icon = ICON_MAP[groupInfo.icon] || Settings;
         const vars = ENV_VARS.filter((v) => v.group === group);
         const hasCnOnly = vars.some((v) => v.requiresCNAUTO);
+        const rows = vars.map((v) => {
+          const customEntry = customEnvByKey.get(v.key);
+          const hasDefinedOverride = !!customEntry;
+          const hasActiveOverride = !!customEntry?.enabled;
+          const hasMirroredEnv = runtimeEnvKeys.includes(v.key);
+          const effectiveValue = envValues[v.key] ?? v.defaultValue;
+          const sourceLabel = hasActiveOverride
+            ? 'custom_env.ini'
+            : hasMirroredEnv ? 'Web 容器环境' : '默认值';
+          const sourceBadge = hasActiveOverride
+            ? 'badge-green'
+            : hasMirroredEnv ? 'badge-blue' : 'badge-amber';
+
+          return {
+            variable: v,
+            customEntry,
+            hasDefinedOverride,
+            hasActiveOverride,
+            effectiveValue,
+            sourceLabel,
+            sourceBadge,
+            disabled: !!(v.requiresCNAUTO && !cnAutoEnabled),
+          };
+        });
 
         return (
           <div className="card" key={group}>
@@ -140,40 +164,61 @@ export default function EnvConfigPage() {
               {group === 'debug' && '调试选项'}
             </div>
 
-            <table className="info-table">
-              <thead>
-                <tr><th>变量</th><th>当前生效值</th><th>来源</th><th>默认值</th><th>说明</th></tr>
-              </thead>
-              <tbody>
-                {vars.map((v) => {
-                  const customEntry = customEnvByKey.get(v.key);
-                  const hasDefinedOverride = !!customEntry;
-                  const hasActiveOverride = !!customEntry?.enabled;
-                  const hasMirroredEnv = runtimeEnvKeys.includes(v.key);
-                  const effectiveValue = envValues[v.key] ?? v.defaultValue;
-                  const sourceLabel = hasActiveOverride
-                    ? 'custom_env.ini'
-                    : hasMirroredEnv ? 'Web 容器环境' : '默认值';
-                  const sourceBadge = hasActiveOverride
-                    ? 'badge-green'
-                    : hasMirroredEnv ? 'badge-blue' : 'badge-amber';
-                  return (
-                    <tr key={v.key} style={{ opacity: (v.requiresCNAUTO && !cnAutoEnabled) ? 0.4 : 1 }}>
-                      <td><code style={{ color: 'var(--accent-cyan)' }}>{v.key}</code></td>
-                      <td style={{ color: effectiveValue !== v.defaultValue ? 'var(--accent-green)' : 'var(--text-muted)', fontWeight: effectiveValue !== v.defaultValue ? 600 : 400 }}>
-                        {effectiveValue || <span style={{ color: 'var(--text-muted)' }}>(空)</span>}
-                      </td>
-                      <td>
-                        <span className={`badge ${sourceBadge}`}>{sourceLabel}</span>
-                        {hasDefinedOverride && !hasActiveOverride && <span className="badge badge-amber" style={{ marginLeft: 6 }}>custom_env 已禁用</span>}
-                      </td>
-                      <td style={{ color: 'var(--text-muted)' }}>{v.defaultValue}</td>
-                      <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 300 }}>{v.description}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="table-scroll env-table-scroll">
+              <table className="info-table env-desktop-table">
+                <thead>
+                  <tr><th>变量</th><th>当前生效值</th><th>来源</th><th>默认值</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => {
+                    const { variable: v, effectiveValue, sourceLabel, sourceBadge, hasDefinedOverride, hasActiveOverride, disabled } = row;
+                    return (
+                      <tr key={v.key} style={{ opacity: disabled ? 0.4 : 1 }}>
+                        <td><code style={{ color: 'var(--accent-cyan)' }}>{v.key}</code></td>
+                        <td style={{ color: effectiveValue !== v.defaultValue ? 'var(--accent-green)' : 'var(--text-muted)', fontWeight: effectiveValue !== v.defaultValue ? 600 : 400 }}>
+                          {effectiveValue || <span style={{ color: 'var(--text-muted)' }}>(空)</span>}
+                        </td>
+                        <td>
+                          <span className={`badge ${sourceBadge}`}>{sourceLabel}</span>
+                          {hasDefinedOverride && !hasActiveOverride && <span className="badge badge-amber" style={{ marginLeft: 6 }}>custom_env 已禁用</span>}
+                        </td>
+                        <td style={{ color: 'var(--text-muted)' }}>{v.defaultValue}</td>
+                        <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 300 }}>{v.description}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="env-mobile-list">
+              {rows.map((row) => {
+                const { variable: v, effectiveValue, sourceLabel, sourceBadge, hasDefinedOverride, hasActiveOverride, disabled } = row;
+                const hasCustomValue = effectiveValue !== v.defaultValue;
+                return (
+                  <div className="env-mobile-card" key={v.key} style={{ opacity: disabled ? 0.48 : 1 }}>
+                    <div className="env-mobile-card-head">
+                      <code>{v.key}</code>
+                      <span className={`badge ${sourceBadge}`}>{sourceLabel}</span>
+                    </div>
+                    <div className="env-mobile-value">
+                      <span>当前生效值</span>
+                      <code style={{ color: hasCustomValue ? 'var(--accent-green)' : 'var(--text-muted)' }}>
+                        {effectiveValue || <span>(空)</span>}
+                      </code>
+                    </div>
+                    <div className="env-mobile-meta">
+                      <span>默认值</span>
+                      <code>{v.defaultValue || '空'}</code>
+                    </div>
+                    {hasDefinedOverride && !hasActiveOverride && (
+                      <span className="badge badge-amber env-mobile-disabled-badge">custom_env 已禁用</span>
+                    )}
+                    <p>{v.description}</p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         );
       })}
